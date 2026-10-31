@@ -1,0 +1,26 @@
+# dsh-super-agent bundle patch — profile 根层。
+#
+# 这一行只把包挂进 profile；**不在加载时注册任何模型可见的东西**。
+# 六个工具与 Router 提示词都是在 `agent/created` 时、按项目配置注册到某个
+# 根会话自己的 scope 上的（见 lib/index.js）。所以：
+#
+#   - 没在项目里写 .dsh/super-agent.json 的项目：看不到工具，看不到提示词；
+#   - 已开启的项目：本项目第一个根会话成为 Router，其余根会话不重复安装；
+#   - Worker（subagent）永远不会拿到 Router 工具。
+#
+# 安装：
+#   dsh plugin --profile web add /abs/path/to/dsh-super-agent
+# 然后重启 dsh web。`insert:` 行随包发布，plugin add 会自动把它追加进
+# profile 的 dsh.profile.bundles；不要手写同 id 的第二个 `- insert:`。
+#
+# 需要覆盖数据根或 profile 级开关时，在 profile 的 cordis.patch.yml 里按 id 覆盖：
+#
+#     - id: super-agent
+#       config:
+#         enabled: false        # 一票否决
+#         dataDir: /abs/path    # 默认 <项目>/.dsh/super-agent
+
+- insert:
+    - id: super-agent
+      name: 'dsh-super-agent'
+      config: {}

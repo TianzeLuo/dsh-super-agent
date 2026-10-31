@@ -1,0 +1,52 @@
+{
+  "name": "dsh-super-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: two-layer Router/Worker super-agent runtime — durable triggers, thread subscriptions, Inline & Spill recall, async dispatch, watchdog, and channel outbox.",
+  "type": "module",
+  "license": "MIT",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./protocol": "./lib/protocol.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "files": [
+    "lib",
+    "bin",
+    "docs",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "super-agent",
+    "superagent",
+    "router",
+    "worker",
+    "event-driven",
+    "watchdog"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": [
+        "./cordis.patch.yml"
+      ]
+    }
+  },
+  "bin": {
+    "super-agent": "./bin/super-agent.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/TianzeLuo/dsh-super-agent.git"
+  }
+}

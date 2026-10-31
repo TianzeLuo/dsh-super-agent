@@ -1,0 +1,274 @@
+/**
+ * plugin.test.mjs — 用假 cordis/Agent 验证宿主接线：项目开关、单 Router、
+ * 工具与提示词注册、HTTP 端点、dispose 后的租约释放。
+ *
+ * 这不是 DSH 集成测试；真实宿主的行为由 runtime.test.mjs 的假 Agent 契约覆盖。
+ * 这里抓的是“装没装、装到哪条 scope、关的时候有没有解绑”这类接线错误。
+ */
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { apply, name } from '../lib/index.js'
+import { storePaths } from '../lib/store.js'
+
+function project() {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-super-agent-plugin-'))
+  mkdirSync(join(root, '.git'))
+  mkdirSync(join(root, '.dsh'))
+  writeFileSync(join(root, '.dsh', 'super-agent.json'), JSON.stringify({
+    version: 1,
+    enabled: true,
+    router: { batchDebounceMs: 3_600_000 },
+  }))
+  return root
+}
+
+function fakeCordis() {
+  const handlers = new Map()
+  const agents = new Map()
+  const routes = new Map()
+  const effects = []
+  const scoped = {
+    agents: {
+      list: () => [...agents.values()],
+      get: (id) => agents.get(id),
+    },
+    logger: {
+      info: () => undefined,
+      warn: () => undefined,
+      debug: () => undefined,
+      error: () => undefined,
+    },
+    connection: {
+      fetch: {
+        register(route) {
+          routes.set(route.path, route)
+          return async () => routes.delete(route.path)
+        },
+      },
+    },
+    on(event, handler) {
+      if (!handlers.has(event)) handlers.set(event, new Set())
+      handlers.get(event).add(handler)
+      return () => handlers.get(event)?.delete(handler)
+    },
+    inject(names, callback) {
+      if (names.includes('connection')) callback(scoped)
+    },
+    effect(factory) {
+      const dispose = factory()
+      effects.push(dispose)
+      return dispose
+    },
+    provide() {},
+  }
+  const root = {
+    inject(names, callback) {
+      callback(scoped)
+    },
+  }
+  return {
+    root,
+    scoped,
+    agents,
+    routes,
+    effects,
+    emit(event, payload) {
+      for (const handler of [...(handlers.get(event) ?? [])]) handler(payload)
+    },
+  }
+}
+
+function fakeAgent({ id, cwd, subagent = false }) {
+  const handlers = new Map()
+  const tools = new Map()
+  const sections = []
+  const contexts = []
+  const messages = []
+  const ctx = {
+    on(event, handler) {
+      if (!handlers.has(event)) handlers.set(event, new Set())
+      handlers.get(event).add(handler)
+      return () => handlers.get(event)?.delete(handler)
+    },
+    emit(event, ...args) {
+      for (const handler of [...(handlers.get(event) ?? [])]) handler(...args)
+    },
+    count(event) {
+      return handlers.get(event)?.size ?? 0
+    },
+    get(name) {
+      return name === 'subagents' ? subagents : undefined
+    },
+    inject(names, callback) {
+      callback(ctx)
+    },
+    tools: {
+      register(definition) {
+        tools.set(definition.name, definition)
+        return () => tools.delete(definition.name)
+      },
+    },
+    systemPrompt: {
+      section(value) {
+        sections.push(value)
+        return () => undefined
+      },
+      context(value) {
+        contexts.push(value)
+        return () => undefined
+      },
+    },
+  }
+  const agent = {
+    id,
+    status: 'idle',
+    ctx,
+    session: { header: { id, cwd, ...(subagent ? { origin: 'subagent', delegationDepth: 1 } : {}) } },
+    messages,
+    tools,
+    sections,
+    contexts,
+    followup(message) {
+      messages.push(message)
+      agent.status = 'running'
+    },
+  }
+  return agent
+}
+
+const subagents = {
+  getProvider: () => ({ name: 'spawn' }),
+  startActivation: async () => {
+    throw new Error('not used in this test')
+  },
+}
+
+test('enabled project installs tools, prompt and HTTP routes on exactly one root agent', async () => {
+  const root = project()
+  const sys = fakeCordis()
+  apply(sys.root)
+
+  const first = fakeAgent({ id: 'session-1', cwd: root })
+  sys.agents.set(first.id, first)
+  sys.emit('agent/created', { agent: first })
+
+  assert.equal(name, 'super-agent')
+  assert.deepEqual([...first.tools.keys()].sort(), [
+    'superagent_close',
+    'superagent_dispatch',
+    'superagent_recall',
+    'superagent_status',
+    'superagent_steer',
+    'superagent_tell',
+  ])
+  assert.equal(first.sections.length, 1)
+  assert.equal(first.sections[0].name, 'super-agent:router')
+  assert.match(first.sections[0].text, /two-layer super-agent/)
+  assert.equal(first.contexts.length, 1)
+  assert.equal(first.ctx.count('tools/pre-execute'), 1)
+  assert.ok(existsSync(join(root, '.dsh', 'super-agent', 'journal.jsonl')))
+  assert.ok(existsSync(join(root, '.dsh', 'super-agent', 'owner.json')))
+  assert.deepEqual([...sys.routes.keys()].sort(), [
+    '/api/super-agent/ingest',
+    '/api/super-agent/outbox',
+    '/api/super-agent/status',
+  ])
+
+  const status = await first.tools.get('superagent_status').execute({}, {})
+  assert.equal(status.ok, true)
+  assert.match(status.summary, /super-agent/)
+
+  // A second root session for the same project must not become a second router.
+  const second = fakeAgent({ id: 'session-2', cwd: root })
+  sys.agents.set(second.id, second)
+  sys.emit('agent/created', { agent: second })
+  assert.equal(second.tools.size, 0)
+
+  // Workers never get router tools.
+  const worker = fakeAgent({ id: 'worker-1', cwd: root, subagent: true })
+  sys.agents.set(worker.id, worker)
+  sys.emit('agent/created', { agent: worker })
+  assert.equal(worker.tools.size, 0)
+
+  sys.emit('agent/disposed', { agent: first })
+  const owner = JSON.parse(readFileSync(storePaths(join(root, '.dsh', 'super-agent')).owner, 'utf8'))
+  assert.ok(typeof owner.releasedAt === 'string')
+
+  // The claim is released, so a later root session can take over.
+  const third = fakeAgent({ id: 'session-3', cwd: root })
+  sys.agents.set(third.id, third)
+  sys.emit('agent/created', { agent: third })
+  assert.equal(third.tools.size, 6)
+  sys.emit('agent/disposed', { agent: third })
+})
+
+test('HTTP ingest and outbox routes operate on the runtime', async () => {
+  const root = project()
+  const sys = fakeCordis()
+  apply(sys.root)
+  const agent = fakeAgent({ id: 'session-http', cwd: root })
+  sys.agents.set(agent.id, agent)
+  sys.emit('agent/created', { agent })
+
+  const ingest = sys.routes.get('/api/super-agent/ingest')
+  const response = await ingest.fetch(new Request('http://127.0.0.1/api/super-agent/ingest', {
+    method: 'POST',
+    body: JSON.stringify({
+      id: 'evt_ext_1',
+      source: 'im',
+      threadKey: 'team:dev',
+      actor: 'alice',
+      text: '@super-agent login is broken',
+    }),
+  }))
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.ok, true)
+  assert.match(body.id, /^trg_/)
+  assert.equal(body.state, 'pending')
+
+  // The same external id is idempotent over HTTP.
+  const duplicate = await ingest.fetch(new Request('http://127.0.0.1/api/super-agent/ingest', {
+    method: 'POST',
+    body: JSON.stringify({ id: 'evt_ext_1', source: 'im', threadKey: 'team:dev', actor: 'alice', text: 'again' }),
+  }))
+  const duplicateBody = await duplicate.json()
+  assert.equal(duplicateBody.duplicate, true)
+
+  const tell = await agent.tools.get('superagent_tell').execute({ channel: 'im', text: 'Fixed login.' }, {})
+  assert.equal(tell.status, 'queued')
+
+  const outbox = await sys.routes.get('/api/super-agent/outbox').fetch(new Request('http://127.0.0.1/api/super-agent/outbox'))
+  const outboxBody = await outbox.json()
+  assert.equal(outboxBody.messages.length, 1)
+  assert.match(outboxBody.messages[0].text, /Fixed login/)
+
+  const recall = await agent.tools.get('superagent_recall').execute({ id: body.id }, {})
+  assert.equal(recall.ok, true)
+  assert.equal(recall.kind, 'trigger')
+
+  const status = await sys.routes.get('/api/super-agent/status').fetch(new Request('http://127.0.0.1/api/super-agent/status'))
+  const statusBody = await status.json()
+  assert.equal(statusBody.ok, true)
+  assert.equal(statusBody.snapshot.counts.triggers, 1)
+
+  sys.emit('agent/disposed', { agent })
+})
+
+test('an uninitialized project stays inert', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-super-agent-plugin-off-'))
+  mkdirSync(join(root, '.git'))
+  const sys = fakeCordis()
+  apply(sys.root)
+  const agent = fakeAgent({ id: 'session-off', cwd: root })
+  sys.agents.set(agent.id, agent)
+  sys.emit('agent/created', { agent })
+  assert.equal(agent.tools.size, 0)
+  assert.equal(agent.sections.length, 0)
+  assert.equal(sys.routes.size, 0)
+})
