@@ -27,6 +27,12 @@ function project() {
   return root
 }
 
+function bareProject() {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-super-agent-bare-'))
+  mkdirSync(join(root, '.git'))
+  return root
+}
+
 function fakeCordis() {
   const handlers = new Map()
   const agents = new Map()
@@ -55,6 +61,9 @@ function fakeCordis() {
       if (!handlers.has(event)) handlers.set(event, new Set())
       handlers.get(event).add(handler)
       return () => handlers.get(event)?.delete(handler)
+    },
+    get(name) {
+      return scoped[name]
     },
     inject(names, callback) {
       if (names.includes('connection')) callback(scoped)
@@ -177,6 +186,9 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
     '/api/super-agent/ingest',
     '/api/super-agent/outbox',
     '/api/super-agent/status',
+    '/api/super-agent/ui/ensure',
+    '/api/super-agent/ui/focus',
+    '/api/super-agent/ui/state',
   ])
 
   const status = await first.tools.get('superagent_status').execute({}, {})
@@ -226,8 +238,8 @@ test('HTTP ingest and outbox routes operate on the runtime', async () => {
       text: '@super-agent login is broken',
     }),
   }))
-  assert.equal(response.status, 200)
   const body = await response.json()
+  assert.equal(response.status, 200)
   assert.equal(body.ok, true)
   assert.match(body.id, /^trg_/)
   assert.equal(body.state, 'pending')
@@ -270,5 +282,113 @@ test('an uninitialized project stays inert', async () => {
   sys.emit('agent/created', { agent })
   assert.equal(agent.tools.size, 0)
   assert.equal(agent.sections.length, 0)
-  assert.equal(sys.routes.size, 0)
+  // UI 入口必须先于 Router 存在；工具/提示词仍然完全不注册。
+  assert.equal(sys.routes.size, 6)
+})
+
+test('UI ensure creates a Router through the generic Session API and focus updates it', async () => {
+  const root = project()
+  const sys = fakeCordis()
+  let nextId = 'session-ui-router'
+  sys.scoped.sessionController = {
+    async create({ cwd, sessionId }) {
+      const id = sessionId ?? nextId
+      const agent = fakeAgent({ id, cwd })
+      sys.agents.set(id, agent)
+      sys.emit('agent/created', { agent })
+      return { sessionId: id }
+    },
+    async resolveAgent(id) {
+      const agent = sys.agents.get(id)
+      return agent === undefined ? { error: { message: 'missing' } } : { agent }
+    },
+    async rename() {},
+  }
+  apply(sys.root)
+  assert.ok(sys.routes.has('/api/super-agent/ui/ensure'))
+
+  const ensure = sys.routes.get('/api/super-agent/ui/ensure')
+  const response = await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: JSON.stringify({ cwd: root }),
+  }))
+  const body = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(body.ok, true)
+  assert.match(body.sessionId, /^session-/)
+  assert.equal(body.reused, false)
+  const pointer = JSON.parse(readFileSync(join(root, '.dsh', 'super-agent', 'router.json'), 'utf8'))
+  assert.equal(pointer.ui, true)
+  assert.equal(pointer.sessionId, body.sessionId)
+  const router = sys.agents.get(body.sessionId)
+  assert.equal(router.tools.size, 6)
+
+  const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
+    new Request('http://127.0.0.1/api/super-agent/ui/state'),
+  )
+  const stateBody = await state.json()
+  assert.equal(stateBody.ok, true)
+  assert.equal(stateBody.active, true)
+  assert.equal(stateBody.router.sessionId, body.sessionId)
+
+  const focus = await sys.routes.get('/api/super-agent/ui/focus').fetch(new Request('http://127.0.0.1/api/super-agent/ui/focus', {
+    method: 'POST',
+    body: JSON.stringify({ cwd: root }),
+  }))
+  const focusBody = await focus.json()
+  assert.equal(focusBody.ok, true)
+  assert.equal(focusBody.focusProject, root)
+
+  // A second ensure returns the same Router instead of minting another.
+  const again = await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: JSON.stringify({ cwd: root }),
+  }))
+  const againBody = await again.json()
+  assert.equal(againBody.sessionId, body.sessionId)
+  assert.equal(againBody.reused, true)
+
+  // Once the project is UI-managed, a fresh blank root session must not steal
+  // the Router before the panel gets a chance to resume the pinned one.
+  const blank = fakeAgent({ id: 'session-fresh-blank', cwd: root })
+  sys.agents.set(blank.id, blank)
+  sys.emit('agent/created', { agent: blank })
+  assert.equal(blank.tools.size, 0)
+
+  sys.emit('agent/disposed', { agent: router })
+})
+
+test('UI ensure initializes a bare project with the minimal enable config', async () => {
+  const root = bareProject()
+  const sys = fakeCordis()
+  sys.scoped.sessionController = {
+    async create({ cwd, sessionId }) {
+      const id = sessionId ?? 'session-bare-router'
+      const agent = fakeAgent({ id, cwd })
+      sys.agents.set(id, agent)
+      sys.emit('agent/created', { agent })
+      return { sessionId: id }
+    },
+    async resolveAgent(id) {
+      const agent = sys.agents.get(id)
+      return agent === undefined ? { error: { message: 'missing' } } : { agent }
+    },
+    async rename() {},
+  }
+  apply(sys.root)
+  const ensure = sys.routes.get('/api/super-agent/ui/ensure')
+  const response = await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: JSON.stringify({ cwd: root }),
+  }))
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.ok, true)
+  assert.match(body.sessionId, /^session-/)
+  assert.ok(existsSync(join(root, '.dsh', 'super-agent.json')))
+  const config = JSON.parse(readFileSync(join(root, '.dsh', 'super-agent.json'), 'utf8'))
+  assert.equal(config.enabled, true)
+  assert.equal(config.version, 1)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 6)
+  sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
 })

@@ -14,12 +14,14 @@
 4. 所有注入模型的文本都有明确上限；全文可按 id 召回。
 5. 宿主重启后，状态与任务意图仍在；能确定性修复的先修，不能的升级给人。
 6. 默认关闭、按项目开启；配置坏掉不连坐会话创建。
+7. 提供一个薄 Web 入口，让使用者不必知道 CLI/HTTP 就能开始与 Super-agent 对话；
+   入口只做会话/焦点编排，不复制聊天协议。
 
 ### 非目标
 
 - 不做 GitHub/Feishu/邮件 API 客户端；频道适配器在 outbox 之外。
 - 不做云端无状态计算、多设备 daemon、分布式存储。
-- 不做 Web 面板（HTTP status/outbox 已够运维与调试）。
+- 不复制一套聊天 UI；浏览器半部只注册入口和面板，消息流复用官方 Conversation。
 - 不保证 exactly-once 外部副作用；只保证事件去重与至少一次投递。
 - 不把提示词注入当成可完全防御的问题；安全边界在宿主与部署。
 
@@ -27,7 +29,8 @@
 
 | 组件 | 文件 | 职责 | 不做什么 |
 | --- | --- | --- | --- |
-| 插件入口 | `lib/index.js` | 项目开关、Router 认领、注册工具/提示词/HTTP、租约 | 不做调度 |
+| 插件入口 | `lib/index.js` | 项目开关、Router 认领、注册工具/提示词/HTTP/UI、租约、跨项目 Session Worker | 不做调度 |
+| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、项目 focus、嵌入式官方会话 | 不定义消息协议 |
 | Runtime | `lib/runtime.js` | 批处理、直通、Worker 生命周期、报告、Watchdog、恢复、inbox | 不调模型 |
 | Store | `lib/store.js` | journal 追加、重放、内存索引 | 不做策略 |
 | Filter | `lib/filter.js` | 程序层快路径 | 不调模型 |
@@ -48,13 +51,21 @@
 2. **单 Router**：一个 `dataDir` 在进程内只允许一个 root agent 认领；后开的根会话
    不安装工具。
 3. **Worker 不安装 Router 工具**：`header.origin === 'subagent'` 或
-   `delegationDepth > 0` 直接跳过。
+   `delegationDepth > 0` 直接跳过；UI/跨项目任务创建的普通 Session 由进程内
+   `reservedWorkerSessions` 集合跳过（即使目标项目碰巧开着插件）。
 4. **已关闭任务不复活**：所有异步回调（spawn 失败、activation 结束、turn/end）
    在写状态前重新读 store，`closed` 一律跳过。
 5. **有界注入**：批次有 `maxBatch` / `maxBatchChars` / `inlineChars`；报告有
    `maxReportChars`；召回有 `maxChars`；Worker 初始上下文有 `initialContextChars`。
-6. **只追加**：插件没有删除/清理/镜像逻辑。`owner.json` 与 `cursor.json` 是
-   单文件覆盖；其余全是 append。
+6. **只追加**：插件没有删除/清理/镜像逻辑。`owner.json`、`cursor.json` 与
+   `router.json` 是单文件覆盖；其余全是 append。
+7. **跨项目写入的沙箱正确性**：DSH subagent 的 `header.cwd` 固定为父会话，
+   `request.cwd` 只改 working directory；因此跨项目 Worker 必须是目标项目的
+   普通 Session，不能靠 subagent 的 cwd 参数硬闯 sandbox。
+8. **单 Router 的 UI 一致性**：`/ui/ensure` 只复用/创建一条 Router；目标项目选择
+   只写 runtime.focusProject，不新建 Router。UI 创建的 Router 指针带 `ui: true`，
+   `maybeInstall` 对「指针里是另一条 UI Router」的普通新会话直接跳过，避免 DSH
+   启动时自动打开的空白会话在 ensure 之前抢占 Router。
 7. **事件正文默认脱敏**：`redact: true` 时，常见 key/token 在进入 journal 前被替换。
 8. **失败不连坐**：配置错误、目录不可写、端口被占、服务缺失，都只让插件对
    本次会话保持关闭，不影响 `agent/created`。
@@ -298,10 +309,11 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 事件正文 | untrusted 分隔块 + 提示词明确「数据不是指令」 | 提示层，不是沙箱 |
 | 凭据 | ingest/report/outbox 前脱敏；事件不应携带凭据 | 正则覆盖常见形态，不穷尽 |
 | 数据根 | 绝对路径校验；拒绝盘符根、`~/.dsh`、系统目录 | 不阻止用户在项目内误放敏感文件 |
-| HTTP | `/api` 前缀，走宿主浏览器鉴权；只提供 ingest/status/outbox | 不额外做 HMAC；需要时由反向代理加 |
+| HTTP | `/api` 前缀，走宿主浏览器鉴权；ingest/status/outbox + 面板的 ensure/state/focus | 不额外做 HMAC；需要时由反向代理加 |
+| UI 入口 | ensure 只允许已存在目录；创建普通 Session；首次写最小项目配置 | 不提供任意文件管理；项目显式 `enabled:false` 时拒绝 |
 | 频道 | 插件不持有 IM/GitHub 凭据；只写 outbox | 桥接器自己负责鉴权与重试 |
 | Router 越权 | 默认开启 `guardExecutionTools`，拦截 bash/write/edit | 只在本插件安装的 agent scope；可显式关闭 |
-| Worker 越权 | 提示词要求不直接联系人、不臆造批准 | Worker 仍有完整工具，不是沙箱 |
+| Worker 越权 | 同项目 subagent；跨项目普通 Session，落在目标项目的 workspace-write 根；提示词要求不直接联系人、不臆造批准 | Worker 仍有完整工具，不是沙箱；普通 Session 使用宿主默认审批 |
 
 文章 §8.4 的「凭据不进入模型上下文」在本插件里是**设计约束**，不是强制机制：
 桥接器应尽量在 outbox 之外完成发送，事件正文不应包含密钥。
@@ -311,6 +323,11 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 现象 | 可能原因 | 看哪里 |
 | --- | --- | --- |
 | 新会话没有工具 | 项目未开启 / 别的会话已认领 / 配置坏 | `status` 的 enabled/reason；宿主日志 `[super-agent]` |
+| 左栏没有入口 | 客户端 bundle 没被发现 / 未重启 web | `package.json` 的 `exports["./client"]`、`dsh.client`；重启 `dsh web` |
+| 面板一直 loading | `conversation.content`/SessionProvider 缺失 | 浏览器控制台；`dsh-client-ui-conversation` 是否在 profile |
+| 选择项目后 Worker 仍写 Router 项目 | 旧版本；focus 未设置；模型显式给了别的 cwd | `/api/super-agent/ui/state` 的 `focusProject`，task 的 `cwd` |
+| 重启后换了 Router 会话 | 指针被自动空白会话覆盖 / 指针没有 `ui:true` | `.dsh/super-agent/router.json`；面板 ensure 会把当前 Router 标记为 ui |
+| 跨项目 Worker 无写权限 | 误用了 subagent | task.workerSessionId 以 `session-` 开头表示普通 Session；journal 的 cwd |
 | 事件一直 pending | Router 忙或宿主无 Router；flush 失败 | `status --full`、`journal` 的 `trigger.failed` |
 | Worker 一直 starting | subagents 服务缺失 / provider 未注册 / 启动慢 | `status`、`journal`、`startTimeoutMs` 后的 watchdog |
 | 收不到 worker 报告 | turn/end 未触发 / session 事件没到 | `children` 日志、`status` 的 lastReport、watchdog |
@@ -347,10 +364,15 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 - 任务/Trigger 的 id 稳定；
 - 不删除历史。
 
-### 增加 Web 面板
+### 扩展 Web 面板
 
-`/api/super-agent/status` 已返回紧凑快照；面板可以再读 journal 或新增只读端点。
-不要在面板里直接写 journal；所有写入走 runtime。
+面板已经存在：`lib/client.js` 注册 `sidebar.panellist` + `main`，并通过
+`/api/super-agent/ui/*` 与宿主交互。新增只读可视化时：
+
+- 优先读 `/api/super-agent/ui/state` 的紧凑快照；需要更多字段时扩展 `routerView`；
+- 不要在浏览器里直接写 journal；所有写入走 runtime/ensure；
+- 不要把 Router 会话换成自定义消息协议；继续用 `conversation.content`，否则会丢掉
+  工具、审批、停止与模型选择。
 
 ## 15. 与官方原型的差异
 
@@ -358,7 +380,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | --- | --- | --- |
 | 目标 | 单机控制面、可测试 | 完整部署（GitHub/Feishu、面板、授权） |
 | Source | CLI/HTTP/inbox，适配器自理 | GitHub/Feishu 内置 |
-| 执行 | DSH subagent（spawn） | DSH Session + 独立工作目录 + 槽位 |
+| 执行 | 同项目 DSH subagent；跨项目目标目录普通 Session | DSH Session + 独立工作目录 + 槽位 |
 | 授权 | 程序层过滤 + Router 判断 | Policy/Mandate/Subscription 完整模型 |
 | 状态 | JSONL journal | SQLite + migrations + versions |
 | Watchdog | 确定性控制回路 + Router 升级 | 独立 Watchdog Session（文章描述） |
@@ -376,11 +398,12 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | Store | `test/store.test.mjs` | 折叠、去重、订阅、报告、重放、坏行 |
 | Render | `test/render.test.mjs` | 摘要、预算、Worker 提示、字数、脱敏 |
 | Recall | `test/recall.test.mjs` | 一跳链接、截断、report/reply/batch |
-| Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、watchdog、恢复、inbox、outbox、speculative |
-| 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP、租约 |
+| Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker |
+| 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP、UI ensure/focus、租约 |
+| 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 85 个用例，全部不需要模型调用。
+共 94 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
@@ -405,7 +428,35 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 7. CLI `emit` 写入的 IM 事件被宿主 ingest，生成 `thr_...`，批次进入 Router，
    再触发 `superagent_dispatch` 与 Worker 报告。
 
-这次验证发现并修复了两个只有真宿主才暴露的问题：
+### Web UI 与跨项目验证
+
+在隔离的 web profile（临时 `DSH_HOME`，脚本化 LLM）里用 Playwright：
+
+1. 左栏出现「Super-agent」，点击后 main 面板嵌入官方 Conversation；输入框、
+   模型选择、Workspace Write 与消息流都来自官方组件。
+2. 页面打开时 `/ui/ensure` 自动创建 Router；`owner.json` / `router.json` 写入。
+3. 选择 project6，面板写 `/ui/focus`；发送任务后 task.cwd=project6。
+4. 跨项目 Worker 的 `workerSessionId` 以 `session-` 开头（普通 Session），
+   `bash` 的 `pwd` 是 project6，`printf > .super-agent-probe.txt` 成功写进 project6；
+   同项目任务仍使用 subagent。
+5. 连续发 3 个慢任务，中间快照 `working=3`，报告随后逐条回到 Router，验证真实
+   Worker 并发与容量限制。
+6. 关闭并重启 web，DSH 启动时自动打开的空白会话会被 `router.json` 的 `ui:true`
+   挡住；`ui/ensure` 恢复同一条 Router，历史消息仍在。
+7. 期间发现并修复：
+   - `resolveAgent` 恢复会话时不一定重发 `agent/created`，改为恢复后显式
+     `maybeInstall`；
+   - 旧进程释放 Session writer 有窗口，恢复需要有限重试；
+   - subagent 的 `header.cwd` 是父项目，跨项目写会被 sandbox 拒绝；因此引入
+     普通 Session Worker，并把它们登记进 `reservedWorkerSessions`，防止目标项目
+     的插件把它们误认成 Router；
+   - 面板不能把空/非空会话简单当 hero，否则真实历史会被欢迎页遮住；只有
+     `session.blank === true` 才用 hero，摘要未到则保持 active；
+   - 重启时 DSH 会先开一条空白根会话；若它抢在 ensure 前成为 Router，历史就会
+     丢在旧会话里。UI 指针标记 `ui:true`，`maybeInstall` 跳过其他空白会话，只有
+     ensure 能恢复/创建 UI Router。
+
+这次验证还发现并修复了两个只有真宿主才暴露的问题：
 
 - Session 事件是 `{type, data}` 包装，不是顶层字段；
 - 子 Agent 的 `turn/end` 与父会话监听可能同时到达，必须用 `(taskId, turn)` 去重。

@@ -165,6 +165,38 @@ export function fakeSubagents(children) {
   }
 }
 
+/** 假跨项目 Session Worker 服务。 */
+export function fakeSessionWorkers(children) {
+  const calls = []
+  return {
+    calls,
+    create(spec) {
+      const id = spec.sessionId ?? `session-worker-${calls.length + 1}`
+      const child = fakeChild(id)
+      child.session.header.cwd = spec.cwd
+      children.set(id, child)
+      const activation = {
+        childId: id,
+        agent: child,
+        started: false,
+        disposed: false,
+        async start() {
+          activation.started = true
+          activation.prompt = spec.prompt
+        },
+        async dispose() {
+          activation.disposed = true
+          children.delete(id)
+          child.dispose()
+        },
+        spec,
+      }
+      calls.push(activation)
+      return Promise.resolve(activation)
+    },
+  }
+}
+
 /** 造一个带 .git 与数据目录的项目。 */
 export function fakeProject() {
   const root = mkdtempSync(join(tmpdir(), 'dsh-super-agent-runtime-'))
@@ -186,6 +218,7 @@ export function setupRuntime(options = {}) {
   const children = options.children ?? new Map()
   const router = options.router ?? fakeRouter(project.root)
   const subagents = options.subagents ?? fakeSubagents(children)
+  const sessionWorkers = options.sessionWorkers ?? fakeSessionWorkers(children)
   const timers = options.timers ?? fakeTimers()
   const config = mergeConfig(DEFAULTS, options.config ?? {})
   const runtime = new SuperAgentRuntime({
@@ -195,12 +228,13 @@ export function setupRuntime(options = {}) {
     projectRoot: project.root,
     dataDir: project.dataDir,
     subagents,
+    sessionWorkers,
     getAgent: (id) => children.get(id),
     logger: { warn: () => undefined, info: () => undefined },
     timers,
   })
   runtime.start()
-  return { ...project, store, children, router, subagents, timers, config, runtime }
+  return { ...project, store, children, router, subagents, sessionWorkers, timers, config, runtime }
 }
 
 /** 让 microtask 链（startActivation → attachWorker）跑完。 */

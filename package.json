@@ -1,6 +1,6 @@
 {
   "name": "dsh-super-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "DSH plugin: two-layer Router/Worker super-agent runtime — durable triggers, thread subscriptions, Inline & Spill recall, async dispatch, watchdog, and channel outbox.",
   "type": "module",
@@ -8,6 +8,7 @@
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",
+    "./client": "./lib/client.js",
     "./protocol": "./lib/protocol.js",
     "./package.json": "./package.json"
   },
@@ -40,6 +41,10 @@
       "patch": [
         "./cordis.patch.yml"
       ]
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
     }
   },
   "bin": {

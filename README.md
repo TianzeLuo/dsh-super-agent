@@ -5,7 +5,9 @@
 里的几个架构选择落成可运行的 DSH 插件：
 
 - **双层 Router/Worker**：宿主里的根会话是 Router；具体任务交给上下文隔离的
-  Worker（DSH subagent）执行。Router 不被长任务阻塞，Worker 不直接对人说话。
+  Worker 执行。同项目任务使用 DSH subagent；跨项目任务在目标项目里创建普通
+  Session（沙箱的 workspace-write 根必须跟着目标项目走）。Router 不被长任务
+  阻塞，Worker 不直接对人说话。
 - **事件驱动**：群聊、Issue/PR、CI、邮件等事件先进入可持久化的 Trigger 队列，
   由程序层快路径过滤，再合批交给 Router 做语义判断。
 - **订阅直通**：已归属某个 Worker 的 Thread，后续事件由程序直接投递给它，
@@ -20,8 +22,9 @@
 
 本仓库是一个**独立实现**，不是 DeepSeek 官方的
 [`dsh-superagent-prototype`](https://github.com/deepseek-ai/dsh-superagent-prototype)。
-官方原型覆盖 GitHub/Feishu Source、授权策略、Web 面板等完整部署；本插件刻意只做
-**单机、可审计、可测试的控制面**，频道适配器和云端存算分离留给部署侧。
+官方原型覆盖 GitHub/Feishu Source、授权策略、完整 Web 面板等部署；本插件刻意只做
+**单机、可审计、可测试的控制面**，外加一个复用官方会话的薄 UI 入口；频道适配器
+和云端存算分离留给部署侧。
 
 ---
 
@@ -34,10 +37,35 @@ cd /path/to/dsh-super-agent
 dsh plugin --profile web add /abs/path/to/dsh-super-agent
 
 # 2) 重启 dsh web（新插件包需要重新加载 profile）
-# 3) 在目标项目里开启（默认关闭；只在有配置的项目里出现工具）
+# 3) 左侧栏点击 Super-agent，选择目标项目，直接开始对话。
+#    首次使用会自动写最小 .dsh/super-agent.json 并创建 Router 会话。
+```
+
+### 统一入口：Super-agent 面板
+
+左栏「Super-agent」和「插件」「Automation tasks」并列。打开后是一个真正的官方
+会话面板，不是另一套聊天实现：
+
+- 面板 retain 一条普通 DSH 根会话，本插件把 Router 提示词和六个工具装上去；
+- 消息流、停止按钮、模型选择、审批、工具卡片全部复用官方 `conversation.content`；
+- 「目标项目」选择器只改 Router 的 **focus project**（`dispatch` 的默认 cwd），
+  不切换 Router；一个 DSH 进程仍只有一条常驻 Router；
+- 选择其他工作区后，Router 默认在目标项目里创建 Worker 会话；同项目用隔离
+  subagent，跨项目用目标项目的普通 Session，因此 `workspace-write` 真正覆盖目标目录；
+- 面板会显示 Router 状态、活跃 Worker/pending/task 数量；会话重启后通过
+  `.dsh/super-agent/router.json` 指针恢复同一条 Router，而不是每次新建；
+  UI 管理的指针带 `"ui": true`，因此 DSH 启动时自动打开的空白会话不会抢占
+  Router，只有面板的 ensure 能恢复它；
+- 若目标项目没有配置，首次 ensure 会写最小 `{"version":1,"enabled":true}`；
+  已有配置不会被覆盖；显式 `enabled:false` 会拒绝并显示原因。
+
+也可以完全不用 UI，走下面的 CLI/HTTP 事件链路：
+
+```sh
+# 在目标项目里开启（UI 会自动做；这里给脚本化部署用）
 node bin/super-agent.mjs init --project /path/to/project
 
-# 4) 发一条外部事件（模拟 IM 里有人点名）
+# 发一条外部事件（模拟 IM 里有人点名）
 node bin/super-agent.mjs emit \
   --project /path/to/project \
   --source im \
@@ -46,28 +74,35 @@ node bin/super-agent.mjs emit \
   --mention super-agent \
   --text "@super-agent 登录页在 Safari 上白屏，能复现并修一下吗？"
 
-# 5) 在 web 里新开一个会话。本项目第一个根会话会成为 Router，
-#    下一轮它会收到 [super-agent] 批次，然后 dispatch 一个 Worker。
+# 在 web 里新开一个会话。本项目第一个根会话会成为 Router，
+# 下一轮它会收到 [super-agent] 批次，然后 dispatch 一个 Worker。
 node bin/super-agent.mjs status --project /path/to/project
 ```
 
 > **谁是 Router？** 一个项目只允许一个 Router：第一个开启插件、且不是 subagent
 > 的根会话认领 `<项目>/.dsh/super-agent` 状态目录。后开的根会话不会重复装工具，
 > 避免多个 Router 抢同一批 Trigger。关闭该会话（或换项目）后，下一个根会话接管。
-> 也可以用 `router.sessionId` 固定某条会话。
+> 也可以用 `router.sessionId` 固定某条会话。通过 UI 使用后，`router.json` 会带上
+> `"ui": true`，重启时自动打开的空白会话不会接管，只有面板 ensure 恢复这条 Router。
 
 没有 `.dsh/super-agent.json` 的项目完全惰性：不注册工具、不注入提示词、不读队列。
 这和省 token 的考虑一致——普通会话不该背 Super-agent 的系统提示词。
 
 ### 用 HTTP 投递
 
-宿主有 web 载体时，插件注册三个端点（都受 `/api` 的浏览器鉴权围栏保护）：
+宿主有 web 载体时，插件注册以下端点（都受 `/api` 的浏览器鉴权围栏保护）：
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | POST | `/api/super-agent/ingest` | 投一条事件，body 同 `emit` 的 JSON |
 | GET | `/api/super-agent/status` | 健康状态 + 紧凑快照 |
 | GET | `/api/super-agent/outbox?channel=im&since=…` | 读待发送的人类消息 |
+| GET | `/api/super-agent/ui/state` | 面板状态：活跃 Router、focus、任务计数 |
+| POST | `/api/super-agent/ui/ensure` | 确保 Router 会话；body `{"cwd":"/abs/project"}` |
+| POST | `/api/super-agent/ui/focus` | 切换 focus project；body 同上 |
+
+后三个端点是面板内部接口；脚本也可以用它做轻量自动化。`ensure` 可能创建一条
+普通 DSH Session（已在运行则复用/恢复），并写最小项目配置。
 
 ```sh
 curl -s http://127.0.0.1:3080/api/super-agent/ingest \
@@ -92,7 +127,12 @@ flowchart LR
     CLI[CLI / HTTP 桥]
   end
 
+  subgraph Browser[浏览器]
+    PANEL[Super-agent 面板\n官方会话 + 项目选择]
+  end
+
   subgraph Host[DSH 宿主进程]
+    UI[UI ensure / focus\n单 Router 指针]
     INBOX[(inbox.jsonl)]
     FILTER[程序层过滤\nFast Path]
     STORE[(journal.jsonl\nTrigger / Thread / Task)]
@@ -113,6 +153,8 @@ flowchart LR
   FILTER -->|过滤| STORE
   STORE --> BATCH
   BATCH -->|"[super-agent] 批次"| ROUTER
+  PANEL -->|ensure / focus| UI
+  UI --> ROUTER
   ROUTER -->|dispatch / steer / close| WORKER1
   ROUTER -->|dispatch| WORKER2
   WORKER1 -->|turn/end → worker-report Trigger| STORE
@@ -135,8 +177,9 @@ flowchart LR
    - 否则进入 pending，等 Router 空闲时合批。
 6. **Router 判断**：批次里只带 id、来源、actor、一行摘要、原文长度；需要细节时
    调 `superagent_recall`。
-7. **Worker 执行**：`superagent_dispatch` 起隔离 subagent，立即返回；Worker 的
-   `turn/end` 被转成 `worker-report` Trigger 回到 Router。
+7. **Worker 执行**：`superagent_dispatch` 立即返回。同项目任务起隔离 subagent；
+   跨项目任务起目标项目的普通 Session（`header.cwd` 指向目标，sandbox 才允许写）。
+   Worker 的 `turn/end` 被转成 `worker-report` Trigger 回到 Router。
 8. **面向人**：Router 用 `superagent_tell` 把消息写进 outbox；频道桥负责真正发送。
 
 ### 为什么 Router 不会被长任务阻塞
@@ -157,7 +200,8 @@ flowchart LR
 
 | 文章 | 本插件 |
 | --- | --- |
-| §2 双层架构 | 根会话 = Router；`ctx.subagents` 起的隔离会话 = Worker；Router 工具与 Worker 工具集分离 |
+| §2 双层架构 | 根会话 = Router；同项目用 `ctx.subagents` 隔离会话，跨项目用目标目录的普通 Session = Worker；Router 工具与 Worker 工具集分离 |
+| §2 统一入口 | 左栏 Super-agent 面板 + `/ui/ensure`；一条常驻 Router，项目选择器只改 focus |
 | §2.1 Router 批处理 | `runtime.scheduleFlush` + `agent/status=idle` 时合并 pending Trigger；单批有数量/字符上限 |
 | §3.1 Fast/Slow Path | `lib/filter.js` 程序层过滤；Router 提示词 + 批次做语义层判断 |
 | §3.2 订阅与直通 | `task.subscribed` 关系；已订阅 Thread 的事件直接 `followup` 给 Worker，多对多 |
@@ -166,7 +210,7 @@ flowchart LR
 | §3.4 投机执行 | `dispatch({speculative:true})`：Worker 在后台准备，Router 决定是否交付或丢弃；提示词禁止不可逆外部动作 |
 | §4.1 异步 ReAct | dispatch/steer/close 立即返回；结果以后续 Trigger 回来 |
 | §4.2 多信道 | `channels` 字数上限 + `superagent_tell` + outbox；IM 默认 100 词 |
-| §5 存算/环境分离 | journal 独立于 Session；任务记录 cwd；Worker 会话丢失后状态仍在，可恢复/重派 |
+| §5 存算/环境分离 | journal 独立于 Session；任务记录 cwd；跨项目 Worker 用目标项目 Session；Worker 会话丢失后状态仍在，可恢复/重派 |
 | §6 Watchdog | 定时检查 + 确定性修复 + 去重升级；无问题时完全安静 |
 
 ---
@@ -189,7 +233,7 @@ queued → starting → working ⇄ idle / blocked / failed / interrupted / lost
 ```
 
 - `queued`：等待 Worker 槽位（`worker.maxWorkers`）。
-- `starting`：`startActivation` 进行中。
+- `starting`：`startActivation` 或跨项目 Session 创建进行中。
 - `working`：Worker 正在跑，或被新的 Thread 事件唤醒。
 - `idle`：最近一轮正常结束，等待后续事件。
 - `blocked` / `failed`：Worker 明确报告阻塞或出错。
@@ -308,6 +352,8 @@ queued → starting → working ⇄ idle / blocked / failed / interrupted / lost
 - `router.sessionId`：固定 Router 会话；留空表示本项目第一个根会话。
 - `worker.maxWorkers`：同时驻留的 Worker 上限；超出进入 `queued`。**idle 的 Worker
   仍占槽位**，Router 应及时 `close` 已完成任务。
+- `worker.defaultCwd`：没有 UI focus、dispatch 也不给 cwd 时的兜底；UI 的
+  目标项目优先于它。
 - `channels.<name>.maxWords`：`superagent_tell` 的硬上限；`0` 表示不限。
 - `redact`：入库前遮盖常见 key/token；不是安全边界，凭据仍不应进入事件。
 
@@ -382,7 +428,7 @@ tail -F /path/to/project/.dsh/super-agent/outbox.jsonl
 npm test
 ```
 
-覆盖 85 个用例：
+覆盖 94 个用例：
 
 - 程序层过滤的所有分支；
 - 项目开关、配置合并、数据根安全边界；
@@ -392,12 +438,16 @@ npm test
 - 假宿主上的完整调度：去重、批处理、直通、多订阅者、报告、steer、close、
   容量队列、Watchdog、恢复、inbox 轮询、outbox；
 - 插件接线：工具/提示词注册、单 Router、subagent 跳过、HTTP 端点、租约释放；
+- UI 接线：`/ui/ensure` 通过通用 Session API 建 Router、`/ui/focus`、复用；
+- 跨项目调度：普通 Session Worker 的创建、prompt 延迟、报告、关闭取消；
+- 浏览器 bundle 合约：单文件 loader、id、仅 require react、面板/侧栏/子槽注册；
 - CLI：init/enable/emit/status/recall/outbox。
 
 测试用假 Agent/假 subagents 替代模型调用，因此不需要网络与 token。
 
 另外在**隔离的 DSH headless profile** 里用脚本化测试 LLM 跑过真实宿主链路
-（不写用户 profile、不需要凭据）：
+（不写用户 profile、不需要凭据），并在隔离的 **web profile** 里用 Playwright
+跑了真实浏览器：
 
 - 插件被 profile 加载，`agent/created` 后只注册到一个 Router；
 - Router 系统提示词、动态状态段与六个工具出现在真实请求头里；
@@ -406,7 +456,14 @@ npm test
   `worker-report` Trigger 并合批回到 Router；
 - `superagent_tell` 真的写出 outbox 行；
 - 默认机制守卫在 Router 调 `bash` 时返回 deny；
-- CLI `emit` 写出的 inbox 事件被宿主 ingest，生成 Thread 并进入批次。
+- CLI `emit` 写出的 inbox 事件被宿主 ingest，生成 Thread 并进入批次；
+- web 左栏出现 Super-agent 入口，打开是嵌在 main 面板里的官方会话；
+- 选择 project6 后输入任务，Router dispatch 的 task `cwd=project6`，跨项目
+  Worker 用普通 Session，`bash` 在 project6 写出探针文件（sandbox 生效）；
+- `superagent_tell` / worker report 回到 Router，面板计数与消息流同步；
+- 连续发 3 个慢任务，中间快照 `working=3`，证明真实 Worker 并发与容量调度；
+- 停止 web 后重启，DSH 启动时新开的空白会话不会抢占 UI Router；
+  `ui/ensure` 恢复带 `"ui": true` 指针的同一条 Router 会话，历史消息仍在。
 
 这个测试夹具只用于开发验证，不随插件发布。
 
@@ -418,6 +475,13 @@ npm test
   没有云端无状态计算，也没有跨设备 daemon。
 - **Worker 会话不跨进程恢复**：宿主重启后，任务标为 `interrupted` 并通知 Router；
   它可以根据 journal 里的 brief 决定重派。`interrupted` 不会自动重跑，避免重复副作用。
+  跨项目 Worker 是普通 Session，会留在目标项目的会话列表里，方便审计；插件不
+  删除、不自动归档它。
+- **跨项目 Worker 的审批**：普通 Session 使用 DSH 的默认审批策略，不继承
+  subagent 的 `approval: never`；需要无人值守时请在项目权限里配置。
+- **UI 管理的项目会被 pin**：一旦面板把 `router.json` 标记为 `"ui": true`，DSH
+  自动新开的空白根会话不会接管 Router；需要面板 ensure 恢复它。若要在该项目改用
+  CLI 驱动的 Router，请显式删除该指针（属于破坏性操作，需自行确认）或换项目。
 - **频道桥未内置**：outbox 是稳定接口，但真正的 IM/GitHub 发送由部署实现。
 - **Router 仍是模型**：程序层保证事件怎么来、去哪、何时合批；是否行动仍由
   Router 提示词与模型判断。`guardExecutionTools`（默认开启）能在机制上限制它亲自执行。
@@ -431,7 +495,8 @@ npm test
 
 ```
 lib/
-  index.js      宿主插件入口：项目开关、单 Router 认领、工具/提示词/HTTP 注册
+  index.js      宿主插件入口：项目开关、单 Router 认领、工具/提示词/HTTP/UI 注册
+  client.js     浏览器半部：侧栏入口、main 面板、官方会话、项目 focus
   runtime.js    Router/Worker 调度、批处理、直通、报告、Watchdog、恢复、inbox
   store.js      追加式 journal + 内存折叠（Trigger/Thread/Task/Reply）
   filter.js     程序层快路径
@@ -445,7 +510,7 @@ lib/
   protocol.js   共享协议常量
 bin/
   super-agent.mjs   CLI
-test/              85 个 node:test 用例
+test/              94 个 node:test 用例
 docs/
   design.md        实现细节与取舍
 ```

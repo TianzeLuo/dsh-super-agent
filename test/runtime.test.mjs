@@ -7,7 +7,8 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFileSync, readFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { threadId } from '../lib/ids.js'
@@ -528,5 +529,69 @@ test('an event on a subscribed thread during startup does not kill the starting 
   await tick()
   assert.equal(ctx.store.getTask(dispatched.taskId).status, 'working')
   assert.equal(ctx.store.getTask(dispatched.taskId).status === 'lost', false)
+  ctx.runtime.stop()
+})
+
+test('cross-project dispatch uses an ordinary Session worker so the target project is writable', async () => {
+  const ctx = setupRuntime()
+  const outside = mkdtempSync(join(tmpdir(), 'dsh-super-agent-other-'))
+  const dispatched = ctx.runtime.dispatch({ title: 'Cross project', brief: 'Write into the other project', cwd: outside })
+  await tick()
+
+  assert.equal(ctx.subagents.spawns.length, 0)
+  assert.equal(ctx.sessionWorkers.calls.length, 1)
+  const activation = ctx.sessionWorkers.calls[0]
+  assert.equal(activation.spec.cwd, outside)
+  assert.equal(activation.started, true)
+  assert.match(activation.prompt, /Cross project/)
+  assert.match(activation.prompt, /Write into the other project/)
+  const task = ctx.store.getTask(dispatched.taskId)
+  assert.equal(task.status, 'working')
+  assert.equal(task.workerSessionId, activation.childId)
+
+  activation.agent.finishTurn({ text: 'cross-project report', reason: 'completed', turn: 1 })
+  await tick()
+  assert.equal(ctx.store.getTask(dispatched.taskId).status, 'idle')
+  ctx.timers.runTimeouts()
+  assert.match(messageText(ctx.router.messages.at(-1)), /cross-project report/)
+
+  // Closing the task cancels the ordinary Session worker without deleting it.
+  ctx.runtime.close({ taskId: dispatched.taskId, reason: 'done' })
+  await tick()
+  assert.equal(activation.disposed, true)
+  ctx.runtime.stop()
+})
+
+test('same-project dispatch keeps the isolated subagent path', async () => {
+  const ctx = setupRuntime()
+  const dispatched = ctx.runtime.dispatch({ title: 'Local task', brief: 'Stay in this project' })
+  await tick()
+  assert.equal(ctx.sessionWorkers.calls.length, 0)
+  assert.equal(ctx.subagents.spawns.length, 1)
+  assert.equal(ctx.store.getTask(dispatched.taskId).status, 'working')
+  ctx.runtime.stop()
+})
+
+test('dispatch without cwd uses the UI focus project, including a cross-project session worker', async () => {
+  const ctx = setupRuntime()
+  const outside = mkdtempSync(join(tmpdir(), 'dsh-super-agent-focus-'))
+  ctx.runtime.setFocusProject(outside)
+  assert.equal(ctx.runtime.status('compact').focusProject, outside)
+  const dispatched = ctx.runtime.dispatch({ title: 'Focused task', brief: 'Work in the selected project' })
+  await tick()
+  assert.equal(ctx.sessionWorkers.calls.length, 1)
+  assert.equal(ctx.sessionWorkers.calls[0].spec.cwd, outside)
+  assert.equal(ctx.store.getTask(dispatched.taskId).cwd, outside)
+  ctx.runtime.stop()
+})
+
+test('focus project validation rejects missing directories and clears explicitly', () => {
+  const ctx = setupRuntime()
+  assert.throws(() => ctx.runtime.setFocusProject('relative/path'), /absolute path/)
+  assert.throws(() => ctx.runtime.setFocusProject(join(ctx.root, 'does-not-exist')), /not a directory/)
+  ctx.runtime.setFocusProject(ctx.root)
+  assert.equal(ctx.runtime.status('compact').focusProject, ctx.root)
+  ctx.runtime.setFocusProject(null)
+  assert.equal(ctx.runtime.status('compact').focusProject, undefined)
   ctx.runtime.stop()
 })
