@@ -209,6 +209,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
     '/api/super-agent/ui/state',
   ])
 
+  assert.ok(first.tools.get('superagent_dispatch').parameters.properties.reuse_task_id)
   const status = await first.tools.get('superagent_status').execute({}, {})
   assert.equal(status.ok, true)
   assert.match(status.summary, /super-agent/)

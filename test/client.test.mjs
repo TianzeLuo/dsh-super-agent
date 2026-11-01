@@ -44,7 +44,7 @@ test('client has no project picker or focus endpoint', () => {
   assert.doesNotMatch(client, /FOCUS_KEY|ROUTES\.focus|sa-project-label/)
   assert.doesNotMatch(client, /<select|target project|目标项目/i)
   assert.match(client, /postJson\(ROUTES\.ensure, \{\}\)/)
-  assert.match(client, /projectsAuto/)
+  assert.doesNotMatch(client, /projectsAuto|welcomeBody|welcomeHint|disclaimer|activityHint|subtitle/)
   assert.doesNotMatch(client, /phase:\s*'hero'|hero:\s*true|useSessionBlank/)
 })
 
@@ -57,5 +57,7 @@ test('client shows the live activity rail and hides Worker sessions', () => {
   assert.match(client, /resetConfirm/)
   assert.match(client, /resetNote/)
   assert.match(client, /workspaceSessions/)
+  assert.match(client, /b\.createdAt/)
+  assert.match(client, /rows\.length > limit/)
   assert.match(client, /async function reset|const reset = React\.useCallback/)
 })

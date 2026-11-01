@@ -181,7 +181,7 @@ dispatch:
 
 pump:
   while liveWorkers < maxWorkers and queued task exists:
-      spawnTask(next)
+      next.continuedFrom ? startReuseTask(next) : spawnTask(next)
 ```
 
 `spawnTask`：
@@ -222,6 +222,20 @@ Worker 是 `subagent-spawn` 起的独立 Agent，工具集由它自己的 preset
 供 steer/Thread 直通，但不占执行槽位。Worker 报告完成后 runtime 调用 `pump`，
 queued 任务立即补位；否则 Router 不主动 `close` 时队列会永久停住（真实 5 任务
 测试发现的问题）。`close` 仍会释放驻留会话。
+
+### Worker 复用
+
+`superagent_dispatch(..., reuse_task_id)` 创建一个 `continuedFrom` 任务：
+
+- 源任务必须 `idle`/`blocked`，Worker 必须 live，且没有其他 `starting/working`
+  任务共享它；
+- 新任务继承源任务的 cwd/project；显式 project/cwd 必须与源目录一致；
+- runtime 不创建新 Session/activation，只 `child.followup(renderWorkerTask(...))`，
+  因此 Worker 保留之前的对话、工具结果和项目上下文；
+- `children` 的 `taskId` 在复用任务启动时切到新任务；事件报告按“当前活动任务”
+  归属，不会写回旧的 idle 任务；
+- Thread 直通按 Worker 去重，并优先当前活动任务；共享 Worker 忙时不再并发投递；
+- 关闭共享 Worker 的任意一个任务不会掐掉其他任务；最后一个任务关闭时才释放。
 
 ## 7. Thread 订阅与直通
 
@@ -422,12 +436,12 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | Store | `test/store.test.mjs` | 折叠、去重、订阅、报告、重放、坏行 |
 | Render | `test/render.test.mjs` | 摘要、预算、Worker 提示、字数、脱敏 |
 | Recall | `test/recall.test.mjs` | 一跳链接、截断、report/reply/batch |
-| Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、idle 释放槽位、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker、project 解析 |
+| Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、idle 释放槽位、Worker 复用、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker、project 解析 |
 | 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP、无 cwd ensure、项目清单、租约、重置 generation/Worker 归档 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 103 个用例，全部不需要模型调用。
+共 132 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
@@ -469,16 +483,18 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
    `bash` 的 `pwd` 是 project6，`printf > .super-agent-probe.txt` 成功写进 project6；
    UI 的 Router 在独立 workspace，所以这次任务走普通 Session（不是 subagent）。
 6. 连续发 3 个慢任务，中间快照 `working=3`，报告随后逐条回到 Router，验证真实
-   Worker 并发与容量限制；右侧活动列表实时出现 3 条 `Working` 任务。
+   Worker 并发与容量限制；右侧活动列表按更新时间显示任务状态。
 7. 5 个慢任务时前 4 个 `working`、第 5 个 `queued`；第 4 个完成后第 5 个自动
    `working`，最终全部 `idle`，证明 idle 不占执行槽位。
-8. Worker Session 行与 `[super-agent]` trigger 用户气泡在浏览器中不可见；
-   Worker 结果只进入右侧活动列表和 Router 的最终回复。
-9. 点击「重置」：二次确认，切换新 dataDir generation，新会话空白、活动列表清空；
-   Worker 会话归档，面板不跳回工作区选择。
-10. 关闭并重启 web，DSH 启动时自动打开的空白会话会被 `router.json` 的 `ui:true`
+8. `reuse-worker` 连续两阶段任务：两个 task 的 `workerSessionId` 相同，第二个带
+   `continuedFrom`；两个都完成后活动栏按创建时间倒序同时显示 Completed。
+9. Worker Session 行、旧 Router 行和 `[super-agent]` trigger 用户气泡在浏览器中
+   不可见；Worker 结果只进入右侧活动列表和 Router 的最终回复。
+10. 点击「重置」：二次确认，切换新 dataDir generation，新会话空白、活动列表清空；
+    Worker 会话归档，面板不跳回工作区选择。
+11. 关闭并重启 web，DSH 启动时自动打开的空白会话会被 `router.json` 的 `ui:true`
    挡住；`ui/ensure` 恢复同一条 Router，历史消息仍在。
-11. 期间发现并修复：
+12. 期间发现并修复：
    - `resolveAgent` 恢复会话时不一定重发 `agent/created`，改为恢复后显式
      `maybeInstall`；
    - 旧进程释放 Session writer 有窗口，恢复需要有限重试；

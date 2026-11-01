@@ -241,6 +241,71 @@ test('an idle completed worker frees the execution slot for the next task', asyn
   ctx.runtime.stop()
 })
 
+test('a task can reuse an idle Worker while keeping its context', async () => {
+  const ctx = setupRuntime()
+  const first = ctx.runtime.dispatch({ title: 'Phase one', brief: 'Build the thing' })
+  await tick()
+  const child = [...ctx.children.values()][0]
+  const workerId = child.id
+  child.finishTurn({ text: 'phase one done', turn: 1 })
+  await tick()
+  assert.equal(ctx.store.getTask(first.taskId).status, 'idle')
+
+  const second = ctx.runtime.dispatch({
+    title: 'Phase two',
+    brief: 'Continue from the previous result',
+    reuseTaskId: first.taskId,
+  })
+  await tick()
+  assert.equal(second.workerSessionId, workerId)
+  assert.equal(second.continuedFrom, first.taskId)
+  assert.equal(ctx.store.getTask(second.taskId).status, 'working')
+  assert.equal(ctx.store.getTask(first.taskId).status, 'idle')
+  assert.equal(ctx.children.size, 1)
+  assert.equal(child.messages.length, 1)
+  assert.match(messageText(child.messages[0]), /Phase two/)
+  assert.match(messageText(child.messages[0]), /Continues task/)
+
+  child.finishTurn({ text: 'phase two done', turn: 2 })
+  await tick()
+  assert.equal(ctx.store.getTask(second.taskId).status, 'idle')
+  assert.equal(ctx.store.getTask(first.taskId).status, 'idle')
+
+  // Closing the old task must not kill the Worker still owned by the new task.
+  const closed = ctx.runtime.close({ taskId: first.taskId })
+  assert.equal(closed.workerRetained, true)
+  assert.equal(ctx.children.size, 1)
+  ctx.runtime.close({ taskId: second.taskId })
+  await tick()
+  assert.equal(ctx.children.size, 0)
+  ctx.runtime.stop()
+})
+
+test('reusing a worker rejects a busy or closed context', async () => {
+  const ctx = setupRuntime()
+  const first = ctx.runtime.dispatch({ title: 'Phase one', brief: 'Build the thing' })
+  await tick()
+  const child = [...ctx.children.values()][0]
+  child.finishTurn({ text: 'done', turn: 1 })
+  await tick()
+
+  const second = ctx.runtime.dispatch({ title: 'Phase two', brief: 'Continue', reuseTaskId: first.taskId })
+  await tick()
+  assert.equal(ctx.store.getTask(second.taskId).status, 'working')
+  assert.throws(
+    () => ctx.runtime.dispatch({ title: 'Parallel', brief: 'Must not share a busy worker', reuseTaskId: first.taskId }),
+    /busy/i,
+  )
+  ctx.runtime.close({ taskId: first.taskId })
+  ctx.runtime.close({ taskId: second.taskId })
+  await tick()
+  assert.throws(
+    () => ctx.runtime.dispatch({ title: 'After close', brief: 'No live worker', reuseTaskId: first.taskId }),
+    /cannot be reused|no longer live|no live worker|not found/i,
+  )
+  ctx.runtime.stop()
+})
+
 test('watchdog marks a missing worker lost and reports to the router', async () => {
   const ctx = setupRuntime()
   const tid = threadId('im', 'team:dev')
