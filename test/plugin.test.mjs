@@ -359,11 +359,26 @@ test('UI ensure creates a Router through the generic Session API and focus updat
   sys.emit('agent/disposed', { agent: router })
 })
 
-test('UI ensure without cwd chooses a project from the host inventory', async () => {
+test('UI ensure without cwd uses an independent Super-agent workspace', async () => {
   const root = project()
+  const home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-home-'))
   const sys = fakeCordis()
+  const created = []
+  const attached = []
   sys.scoped.workspaceRegistry = {
-    list: () => [{ id: 'ws-1', title: 'alpha', path: root, sessionIds: [] }],
+    list: () => [
+      { id: 'ws-user', title: 'alpha', path: root, sessionIds: [] },
+      ...created,
+    ],
+    create(path, title) {
+      created.push({ id: 'ws-super-agent', title, path, sessionIds: [] })
+      return {
+        id: 'ws-super-agent',
+        title,
+        path,
+        attachSession: async (sessionId) => { attached.push(sessionId) },
+      }
+    },
   }
   sys.scoped.sessionController = {
     async create({ cwd, sessionId }) {
@@ -378,7 +393,7 @@ test('UI ensure without cwd chooses a project from the host inventory', async ()
     },
     async rename() {},
   }
-  apply(sys.root)
+  apply(sys.root, { superAgentHome: home })
   const ensure = sys.routes.get('/api/super-agent/ui/ensure')
   const response = await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
     method: 'POST',
@@ -387,7 +402,11 @@ test('UI ensure without cwd chooses a project from the host inventory', async ()
   const body = await response.json()
   assert.equal(response.status, 200)
   assert.equal(body.ok, true)
-  assert.equal(body.projectRoot, root)
+  assert.equal(body.projectRoot, home)
+  assert.ok(existsSync(join(home, '.dsh-super-agent-workspace')))
+  assert.ok(existsSync(join(home, '.dsh', 'super-agent.json')))
+  assert.deepEqual(created.map((workspace) => [workspace.title, workspace.path]), [['Super-agent Workspace', home]])
+  assert.deepEqual(attached, [body.sessionId])
   assert.equal(sys.agents.get(body.sessionId).tools.size, 7)
   const projectTool = await sys.agents.get(body.sessionId).tools.get('superagent_projects').execute({}, {})
   assert.deepEqual(projectTool.projects.map((project) => project.title), ['alpha'])
@@ -397,6 +416,88 @@ test('UI ensure without cwd chooses a project from the host inventory', async ()
   const stateBody = await state.json()
   assert.deepEqual(stateBody.projects.map((project) => project.title), ['alpha'])
   sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
+})
+
+test('UI ensure starts without any user project', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-home-empty-'))
+  const sys = fakeCordis()
+  sys.scoped.workspaceRegistry = {
+    list: () => [],
+    create: (path, title) => ({ id: 'ws-home', title, path, attachSession: async () => undefined }),
+  }
+  sys.scoped.sessionController = {
+    async create({ cwd, sessionId }) {
+      const agent = fakeAgent({ id: sessionId, cwd })
+      sys.agents.set(agent.id, agent)
+      sys.emit('agent/created', { agent })
+      return { sessionId: agent.id }
+    },
+    async resolveAgent(id) {
+      const agent = sys.agents.get(id)
+      return agent === undefined ? { error: { message: 'missing' } } : { agent }
+    },
+    async rename() {},
+  }
+  apply(sys.root, { superAgentHome: home })
+  const ensure = sys.routes.get('/api/super-agent/ui/ensure')
+  const response = await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: '{}',
+  }))
+  const body = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(body.projectRoot, home)
+  const projectTool = await sys.agents.get(body.sessionId).tools.get('superagent_projects').execute({}, {})
+  assert.deepEqual(projectTool.projects, [])
+  sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
+})
+
+test('the dedicated Router takes precedence over an older project Router', async () => {
+  const root = project()
+  const home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-home-priority-'))
+  const sys = fakeCordis()
+  sys.scoped.workspaceRegistry = {
+    list: () => [{ id: 'ws-user', title: 'alpha', path: root, sessionIds: [] }],
+    create: (path, title) => ({ id: 'ws-home', title, path, attachSession: async () => undefined }),
+  }
+  sys.scoped.sessionController = {
+    async create({ cwd, sessionId }) {
+      const agent = fakeAgent({ id: sessionId, cwd })
+      sys.agents.set(agent.id, agent)
+      sys.emit('agent/created', { agent })
+      return { sessionId: agent.id }
+    },
+    async resolveAgent(id) {
+      const agent = sys.agents.get(id)
+      return agent === undefined ? { error: { message: 'missing' } } : { agent }
+    },
+    async rename() {},
+  }
+  apply(sys.root, { superAgentHome: home })
+  const old = fakeAgent({ id: 'session-old-project-router', cwd: root })
+  sys.agents.set(old.id, old)
+  sys.emit('agent/created', { agent: old })
+  assert.equal(old.tools.size, 7)
+
+  const ensure = sys.routes.get('/api/super-agent/ui/ensure')
+  const response = await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: '{}',
+  }))
+  const body = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(body.projectRoot, home)
+  assert.notEqual(body.sessionId, old.id)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 7)
+  const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
+    new Request('http://127.0.0.1/api/super-agent/ui/state'),
+  )
+  const stateBody = await state.json()
+  assert.equal(stateBody.router.projectRoot, home)
+  assert.equal(stateBody.router.sessionId, body.sessionId)
+  assert.equal(stateBody.routers.length, 2)
+  sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
+  sys.emit('agent/disposed', { agent: old })
 })
 
 test('UI ensure initializes a bare project with the minimal enable config', async () => {

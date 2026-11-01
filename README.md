@@ -40,7 +40,8 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 
 # 2) 重启 dsh web（新插件包需要重新加载 profile）
 # 3) 左侧栏点击 Super-agent，直接用自然语言说你要做什么。
-#    不需要选工作区；项目由 Router 自动发现，首次使用会自动准备 Router。
+#    首次使用会创建独立的 Super-agent Workspace（不是任何用户项目），
+#    项目由 Router 通过 superagent_projects 自动发现。
 ```
 
 ### 统一入口：Super-agent 面板
@@ -56,22 +57,37 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
   `superagent_projects` 查看左侧栏已有项目，并从用户描述中自主选择目标，
   再用 `superagent_dispatch(project: "...")` 在目标项目里发起 Worker。用户不需要
   先选工作区，也不需要把项目路径贴进对话；
-- 宿主自动恢复/选择 Router 的**运行目录**；这个目录只是 Router 会话的宿主，
-  不是任务目标。一个 DSH 进程仍只有一条常驻 Router；
-- 同项目用隔离 subagent，跨项目用目标项目的普通 Session，因此
-  `workspace-write` 真正覆盖目标目录；
+- 宿主为 Router 初始化一个**独立的 Super-agent Workspace**（默认在平台应用数据
+  目录，见下），不会借用任何用户项目；它只承载 Router 会话，Router 通过
+  `superagent_projects` 看到的只有用户项目。面板只使用这一条常驻 Router；
+- UI 的 Router 在独立 workspace，用户项目相对它都是“跨项目”，因此 UI 发起的
+  项目任务都用**目标项目的普通 Session**（可见、可审批、`workspace-write` 正确）；
+  同项目 subagent 仍用于 CLI/headless 的项目 Router 或 Router 在自己目录里跑任务；
 - 面板会显示 Router 状态、活跃 Worker/pending/task 数量；会话重启后通过
   `.dsh/super-agent/router.json` 指针恢复同一条 Router，而不是每次新建；
   UI 管理的指针带 `"ui": true`，因此 DSH 启动时自动打开的空白会话不会抢占
   Router，只有面板的 ensure 能恢复它；
-- 若自动选中的运行项目没有配置，首次 ensure 会写最小
-  `{"version":1,"enabled":true}`；已有配置不会被覆盖；显式 `enabled:false`
-  会拒绝并显示原因。
+- 独立 workspace 首次 ensure 会写最小 `{"version":1,"enabled":true}`；已有配置
+  不会被覆盖；显式 `enabled:false` 会拒绝并显示原因。用户项目完全不会被自动写
+  配置，只有显式 CLI `init` 才会。
+
+独立 workspace 默认位置：
+
+| 平台 | 路径 |
+| --- | --- |
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/dsh-super-agent/workspace` |
+| macOS | `~/Library/Application Support/dsh-super-agent/workspace` |
+| Windows | `%LOCALAPPDATA%\dsh-super-agent\workspace` |
+
+可用环境变量 `DSH_SUPER_AGENT_HOME` 或 profile 配置 `"superAgentHome": "/abs/path"`
+覆盖。它会在左侧栏显示为 **Super-agent Workspace**，但不会出现在
+`superagent_projects` 的项目清单里。升级前已经落在用户项目里的旧 Router 会话
+不会被删除或改写；面板改用新的独立 Router，旧会话仍留在原项目历史中。
 
 也可以完全不用 UI，走下面的 CLI/HTTP 事件链路：
 
 ```sh
-# 在目标项目里开启（UI 会自动做；这里给脚本化部署用）
+# 只有要让某个用户项目自己当 Router 时才需要；Super-agent 面板不会写用户项目
 node bin/super-agent.mjs init --project /path/to/project
 
 # 发一条外部事件（模拟 IM 里有人点名）
@@ -88,11 +104,12 @@ node bin/super-agent.mjs emit \
 node bin/super-agent.mjs status --project /path/to/project
 ```
 
-> **谁是 Router？** 一个项目只允许一个 Router：第一个开启插件、且不是 subagent
-> 的根会话认领 `<项目>/.dsh/super-agent` 状态目录。后开的根会话不会重复装工具，
-> 避免多个 Router 抢同一批 Trigger。关闭该会话（或换项目）后，下一个根会话接管。
-> 也可以用 `router.sessionId` 固定某条会话。通过 UI 使用后，`router.json` 会带上
-> `"ui": true`，重启时自动打开的空白会话不会接管，只有面板 ensure 恢复这条 Router。
+> **谁是 Router？** UI 使用独立 workspace 里的 Router；CLI/headless 也可以在某个
+> 用户项目里启用一个项目 Router（两者是不同 dataDir，不会互相抢 Trigger）。
+> 一个 dataDir 只允许一个 Router：第一个开启插件、且不是 subagent 的根会话认领
+> `<workspace>/.dsh/super-agent`。也可以用 `router.sessionId` 固定某条会话。
+> 通过 UI 使用后，独立 workspace 的 `router.json` 会带上 `"ui": true`，重启时自动
+> 打开的空白会话不会接管，只有面板 ensure 恢复这条 Router。
 
 没有 `.dsh/super-agent.json` 的项目完全惰性：不注册工具、不注入提示词、不读队列。
 这和省 token 的考虑一致——普通会话不该背 Super-agent 的系统提示词。
@@ -111,9 +128,9 @@ node bin/super-agent.mjs status --project /path/to/project
 | POST | `/api/super-agent/ui/focus` | 兼容脚本：设置旧版 focus project；面板已不再调用 |
 
 后三个端点是面板内部接口；脚本也可以用它做轻量自动化。`ensure` 不要求 cwd：
-它会优先恢复带 UI 指针的 Router，否则从宿主项目清单里选一个运行目录；只有脚本
-需要指定目录时才传 cwd。首次 ensure 可能创建一条普通 DSH Session（已在运行则
-复用/恢复），并写最小项目配置。
+它会创建/恢复独立的 Super-agent Workspace 里的 Router，而不是任何用户项目；
+只有脚本显式传 cwd 时才使用指定目录。首次 ensure 可能创建一条普通 DSH Session
+（已在运行则复用/恢复），并只在独立 workspace 里写最小配置。
 
 ```sh
 curl -s http://127.0.0.1:3080/api/super-agent/ingest \
@@ -188,8 +205,9 @@ flowchart LR
    - 否则进入 pending，等 Router 空闲时合批。
 6. **Router 判断**：批次里只带 id、来源、actor、一行摘要、原文长度；需要细节时
    调 `superagent_recall`。
-7. **Worker 执行**：`superagent_dispatch` 立即返回。同项目任务起隔离 subagent；
-   跨项目任务起目标项目的普通 Session（`header.cwd` 指向目标，sandbox 才允许写）。
+7. **Worker 执行**：`superagent_dispatch` 立即返回。目标在 Router 自己的项目内时
+   起隔离 subagent；目标在 Router 之外（UI 的独立 workspace 下，所有用户项目都
+   属于此类）时起目标项目的普通 Session（`header.cwd` 指向目标，sandbox 才允许写）。
    Worker 的 `turn/end` 被转成 `worker-report` Trigger 回到 Router。
 8. **面向人**：Router 用 `superagent_tell` 把消息写进 outbox；频道桥负责真正发送。
 
@@ -211,7 +229,7 @@ flowchart LR
 
 | 文章 | 本插件 |
 | --- | --- |
-| §2 双层架构 | 根会话 = Router；同项目用 `ctx.subagents` 隔离会话，跨项目用目标目录的普通 Session = Worker；Router 工具与 Worker 工具集分离 |
+| §2 双层架构 | 根会话 = Router；Router 项目内用 `ctx.subagents` 隔离会话，项目外用目标目录的普通 Session = Worker；Router 工具与 Worker 工具集分离；UI Router 的独立 workspace 让用户项目都走后者 |
 | §2 统一入口 | 左栏 Super-agent 面板 + `/ui/ensure`；一条常驻 Router，项目由 Router 自主选择 |
 | §2.1 Router 批处理 | `runtime.scheduleFlush` + `agent/status=idle` 时合并 pending Trigger；单批有数量/字符上限 |
 | §3.1 Fast/Slow Path | `lib/filter.js` 程序层过滤；Router 提示词 + 批次做语义层判断 |
@@ -363,6 +381,8 @@ queued → starting → working ⇄ idle / blocked / failed / interrupted / lost
 - `ignorePatterns`：正文正则；坏正则会得到 warning，不会让插件失败。
 - `dataDir`：相对项目根或绝对路径。拒绝盘符根、`~/.dsh`、系统目录。
 - `router.sessionId`：固定 Router 会话；留空表示本项目第一个根会话。
+- `superAgentHome`（profile 配置 / `DSH_SUPER_AGENT_HOME`）：独立 Super-agent
+  Workspace 的绝对路径；默认在平台应用数据目录，见 UI 一节。
 - `worker.maxWorkers`：同时驻留的 Worker 上限；超出进入 `queued`。**idle 的 Worker
   仍占槽位**，Router 应及时 `close` 已完成任务。
 - `worker.defaultCwd`：Router 自己也没选项目、dispatch 又不给 cwd 时的兜底。
@@ -441,18 +461,19 @@ tail -F /path/to/project/.dsh/super-agent/outbox.jsonl
 npm test
 ```
 
-覆盖 97 个用例：
+覆盖 100 个用例：
 
 - 程序层过滤的所有分支；
-- 项目开关、配置合并、数据根安全边界；
+- 项目开关、配置合并、数据根安全边界、独立 workspace 边界标记；
 - journal 追加、重放、坏行处理、任务状态折叠；
 - Inline/Spill 批次预算、Worker 初始提示、字数、脱敏；
 - 链式召回的 trigger/thread/task/batch/report/reply 引用图；
 - 假宿主上的完整调度：去重、批处理、直通、多订阅者、报告、steer、close、
   容量队列、Watchdog、恢复、inbox 轮询、outbox；
 - 插件接线：工具/提示词注册、单 Router、subagent 跳过、HTTP 端点、租约释放；
-- UI 接线：`/ui/ensure` 通过通用 Session API 建 Router、无 cwd 时从宿主项目清单
-  自动选运行目录、`/ui/focus` 兼容、复用；
+- UI 接线：`/ui/ensure` 通过通用 Session API 在独立 workspace 建 Router、
+  无用户项目也能启动、注册 workspace、把 Router 挂进 workspace 会话组、项目清单
+  排除独立 workspace、旧项目 Router 不抢占 UI、`/ui/focus` 兼容、复用；
 - 项目解析：`superagent_projects` 清单、标题/id/path 唯一匹配、dispatch(project)；
 - 跨项目调度：普通 Session Worker 的创建、prompt 延迟、报告、关闭取消；
 - 浏览器 bundle 合约：单文件 loader、id、仅 require react、面板/侧栏/子槽注册；
@@ -481,6 +502,9 @@ npm test
   状态里的 `task.project=project6`、`cwd=.../project6`，证明 Router 自主选项目；
 - 用全新 DSH home（无 Router 指针、只有 project-ui-b）打开空白 Router：官方 hero
   未渲染，WorkspaceChip/工作区列表为 0 个，直接显示官方 composer；
+- 设置 `DSH_SUPER_AGENT_HOME` 后，Router 的 `projectRoot` 是独立 workspace；它被
+  注册为「Super-agent Workspace」，且从 `superagent_projects`/面板项目清单里排除；
+  auto-project 任务仍然落到 project6；
 - 停止 web 后重启，DSH 启动时新开的空白会话不会抢占 UI Router；
   `ui/ensure` 恢复带 `"ui": true` 指针的同一条 Router 会话，历史消息仍在。
 
@@ -529,7 +553,7 @@ lib/
   protocol.js   共享协议常量
 bin/
   super-agent.mjs   CLI
-test/              97 个 node:test 用例
+test/              100 个 node:test 用例
 docs/
   design.md        实现细节与取舍
 ```

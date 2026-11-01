@@ -11,8 +11,11 @@ import { join } from 'node:path'
 import {
   DEFAULTS,
   DEFAULT_DATA_DIR,
+  SUPER_AGENT_WORKSPACE_MARKER,
   checkDataDir,
+  defaultSuperAgentWorkspaceHome,
   findProjectRoot,
+  isSuperAgentWorkspace,
   loadProjectConfig,
   mergeConfig,
   sourcePolicy,
@@ -35,6 +38,20 @@ test('findProjectRoot walks up to the nearest .git', () => {
   const nested = join(root, 'a', 'b')
   mkdirSync(nested, { recursive: true })
   assert.equal(findProjectRoot(nested), root)
+})
+
+test('the dedicated Super-agent workspace is its own project boundary', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-home-config-'))
+  writeFileSync(join(home, SUPER_AGENT_WORKSPACE_MARKER), '{}\n')
+  const nested = join(home, 'a', 'b')
+  mkdirSync(nested, { recursive: true })
+  assert.equal(findProjectRoot(nested), home)
+  assert.equal(isSuperAgentWorkspace(home, home), true)
+  assert.equal(isSuperAgentWorkspace(nested, home), false)
+  assert.equal(defaultSuperAgentWorkspaceHome({ DSH_SUPER_AGENT_HOME: home }, 'linux', '/home/test'), home)
+  const fallback = defaultSuperAgentWorkspaceHome({}, 'linux', '/home/test')
+  assert.match(fallback, /dsh-super-agent[\\/]workspace$/)
+  assert.doesNotMatch(fallback, /[\\/]\.dsh[\\/]/)
 })
 
 test('missing config keeps the project disabled by default', () => {
