@@ -189,6 +189,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
     '/api/super-agent/status',
     '/api/super-agent/ui/ensure',
     '/api/super-agent/ui/focus',
+    '/api/super-agent/ui/reset',
     '/api/super-agent/ui/state',
   ])
 
@@ -284,7 +285,7 @@ test('an uninitialized project stays inert', async () => {
   assert.equal(agent.tools.size, 0)
   assert.equal(agent.sections.length, 0)
   // UI 入口必须先于 Router 存在；工具/提示词仍然完全不注册。
-  assert.equal(sys.routes.size, 6)
+  assert.equal(sys.routes.size, 7)
 })
 
 test('UI ensure creates a Router through the generic Session API and focus updates it', async () => {
@@ -371,13 +372,18 @@ test('UI ensure without cwd uses an independent Super-agent workspace', async ()
       ...created,
     ],
     create(path, title) {
-      created.push({ id: 'ws-super-agent', title, path, sessionIds: [] })
-      return {
+      const workspace = {
         id: 'ws-super-agent',
         title,
         path,
-        attachSession: async (sessionId) => { attached.push(sessionId) },
+        sessionIds: [],
+        attachSession: async (sessionId) => {
+          attached.push(sessionId)
+          workspace.sessionIds.unshift(sessionId)
+        },
       }
+      created.push(workspace)
+      return workspace
     },
   }
   sys.scoped.sessionController = {
@@ -391,6 +397,7 @@ test('UI ensure without cwd uses an independent Super-agent workspace', async ()
       const agent = sys.agents.get(id)
       return agent === undefined ? { error: { message: 'missing' } } : { agent }
     },
+    async prompt() {},
     async rename() {},
   }
   apply(sys.root, { superAgentHome: home })
@@ -415,6 +422,7 @@ test('UI ensure without cwd uses an independent Super-agent workspace', async ()
   )
   const stateBody = await state.json()
   assert.deepEqual(stateBody.projects.map((project) => project.title), ['alpha'])
+  assert.deepEqual(stateBody.workspaceSessions, [body.sessionId])
   sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
 })
 
@@ -498,6 +506,73 @@ test('the dedicated Router takes precedence over an older project Router', async
   assert.equal(stateBody.routers.length, 2)
   sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
   sys.emit('agent/disposed', { agent: old })
+})
+
+test('UI reset starts a fresh dataDir generation and archives active workers', async () => {
+  const alpha = project()
+  const home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-home-reset-'))
+  const sys = fakeCordis()
+  const archived = []
+  sys.scoped.workspaceRegistry = {
+    list: () => [{ id: 'ws-alpha', title: 'alpha', path: alpha, sessionIds: [] }],
+    create: (path, title) => ({ id: 'ws-home', title, path, attachSession: async () => undefined }),
+    archiveSession: async (sessionId) => { archived.push(sessionId) },
+  }
+  sys.scoped.sessionController = {
+    async create({ cwd, sessionId }) {
+      const agent = fakeAgent({ id: sessionId, cwd })
+      sys.agents.set(agent.id, agent)
+      sys.emit('agent/created', { agent })
+      return { sessionId: agent.id }
+    },
+    async resolveAgent(id) {
+      const agent = sys.agents.get(id)
+      return agent === undefined ? { error: { message: 'missing' } } : { agent }
+    },
+    async rename() {},
+  }
+  apply(sys.root, { superAgentHome: home })
+  const ensure = sys.routes.get('/api/super-agent/ui/ensure')
+  const first = await (await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST', body: '{}',
+  }))).json()
+  const oldSession = first.sessionId
+  const oldDataDir = first.dataDir
+  const dispatch = await sys.agents.get(oldSession).tools.get('superagent_dispatch').execute({
+    title: 'Active reset worker',
+    brief: 'do the reset probe',
+    project: 'alpha',
+  }, {})
+  assert.ok(['queued', 'starting'].includes(dispatch.status))
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 100))
+  const activeState = await (await sys.routes.get('/api/super-agent/ui/state').fetch(
+    new Request('http://127.0.0.1/api/super-agent/ui/state'),
+  )).json()
+  const activeWorker = activeState.router.status.tasks.find((task) => task.title === 'Active reset worker')?.workerSessionId
+  assert.match(activeWorker, /^session-/)
+
+  const reset = sys.routes.get('/api/super-agent/ui/reset')
+  const response = await reset.fetch(new Request('http://127.0.0.1/api/super-agent/ui/reset', {
+    method: 'POST', body: '{}',
+  }))
+  const body = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(body.ok, true)
+  assert.equal(body.reset, true)
+  assert.equal(body.previousSessionId, oldSession)
+  assert.notEqual(body.sessionId, oldSession)
+  assert.notEqual(body.dataDir, oldDataDir)
+  assert.match(body.dataDir, /super-agent-resets[\\/]gen-/)
+  assert.ok(archived.every((sessionId) => sessionId !== oldSession))
+  assert.ok(archived.includes(activeWorker))
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 7)
+  const state = await (await sys.routes.get('/api/super-agent/ui/state').fetch(
+    new Request('http://127.0.0.1/api/super-agent/ui/state'),
+  )).json()
+  assert.equal(state.router.sessionId, body.sessionId)
+  assert.deepEqual(state.router.status.tasks, [])
+  assert.equal(JSON.parse(readFileSync(join(home, '.dsh', 'super-agent.json'), 'utf8')).dataDir, body.dataDir)
+  sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
 })
 
 test('UI ensure initializes a bare project with the minimal enable config', async () => {

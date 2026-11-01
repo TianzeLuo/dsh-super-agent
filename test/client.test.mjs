@@ -36,6 +36,7 @@ test('client registers the sidebar entry, main panel and session-scoped child', 
   assert.match(client, /CONVERSATION_SLOT/)
   assert.match(client, /scope: 'session'/)
   assert.match(client, /\/api\/super-agent\/ui\/ensure/)
+  assert.match(client, /\/api\/super-agent\/ui\/reset/)
   assert.match(client, /conversation\.content/)
 })
 
@@ -45,4 +46,16 @@ test('client has no project picker or focus endpoint', () => {
   assert.match(client, /postJson\(ROUTES\.ensure, \{\}\)/)
   assert.match(client, /projectsAuto/)
   assert.doesNotMatch(client, /phase:\s*'hero'|hero:\s*true|useSessionBlank/)
+})
+
+test('client shows the live activity rail and hides Worker sessions', () => {
+  assert.match(client, /activityTitle/)
+  assert.match(client, /ActivityRail/)
+  assert.match(client, /data-row-key/)
+  assert.match(client, /data-chat-flow-kind/)
+  assert.match(client, /Super-agent worker ·/)
+  assert.match(client, /resetConfirm/)
+  assert.match(client, /resetNote/)
+  assert.match(client, /workspaceSessions/)
+  assert.match(client, /async function reset|const reset = React\.useCallback/)
 })

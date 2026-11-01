@@ -30,7 +30,7 @@
 | 组件 | 文件 | 职责 | 不做什么 |
 | --- | --- | --- | --- |
 | 插件入口 | `lib/index.js` | 项目开关、Router 认领、注册工具/提示词/HTTP/UI、租约、跨项目 Session Worker | 不做调度 |
-| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话；无项目选择器 | 不定义消息协议，不选项目 |
+| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话、右侧活动栏、二次确认重置、Worker/旧 Router 展示层隐藏；无项目选择器 | 不定义消息协议，不选项目 |
 | Runtime | `lib/runtime.js` | 批处理、直通、Worker 生命周期、报告、Watchdog、恢复、inbox | 不调模型 |
 | Store | `lib/store.js` | journal 追加、重放、内存索引 | 不做策略 |
 | Filter | `lib/filter.js` | 程序层快路径 | 不调模型 |
@@ -205,10 +205,10 @@ Worker 是 `subagent-spawn` 起的独立 Agent，工具集由它自己的 preset
 
 ### 容量与槽位
 
-`maxWorkers` 统计「starting 或仍有 live Worker 会话」的任务，包括 `idle`。
-理由：DSH subagent 的驻留会话本身占资源；idle 不等于可以无限堆积。Router
-应在任务完成后 `close`，释放槽位与 Worker 会话。排队任务在槽位释放后由
-`pump` 自动启动。
+`maxWorkers` 统计「starting 或 working」的任务；idle Worker 可以继续驻留，
+供 steer/Thread 直通，但不占执行槽位。Worker 报告完成后 runtime 调用 `pump`，
+queued 任务立即补位；否则 Router 不主动 `close` 时队列会永久停住（真实 5 任务
+测试发现的问题）。`close` 仍会释放驻留会话。
 
 ## 7. Thread 订阅与直通
 
@@ -317,7 +317,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 事件正文 | untrusted 分隔块 + 提示词明确「数据不是指令」 | 提示层，不是沙箱 |
 | 凭据 | ingest/report/outbox 前脱敏；事件不应携带凭据 | 正则覆盖常见形态，不穷尽 |
 | 数据根 | 绝对路径校验；拒绝盘符根、`~/.dsh`、系统目录 | 不阻止用户在项目内误放敏感文件 |
-| HTTP | `/api` 前缀，走宿主浏览器鉴权；ingest/status/outbox + 面板的 ensure/state（focus 仅兼容） | 不额外做 HMAC；需要时由反向代理加 |
+| HTTP | `/api` 前缀，走宿主浏览器鉴权；ingest/status/outbox + 面板的 ensure/state/reset（focus 仅兼容） | 不额外做 HMAC；需要时由反向代理加 |
 | UI 入口 | ensure 不要求 cwd；在独立 Super-agent Workspace 创建普通 Session；不借用/自动配置用户项目 | 不提供任意文件管理；独立 workspace 显式 `enabled:false` 时拒绝 |
 | 频道 | 插件不持有 IM/GitHub 凭据；只写 outbox | 桥接器自己负责鉴权与重试 |
 | Router 越权 | 默认开启 `guardExecutionTools`，拦截 bash/write/edit | 只在本插件安装的 agent scope；可显式关闭 |
@@ -406,12 +406,12 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | Store | `test/store.test.mjs` | 折叠、去重、订阅、报告、重放、坏行 |
 | Render | `test/render.test.mjs` | 摘要、预算、Worker 提示、字数、脱敏 |
 | Recall | `test/recall.test.mjs` | 一跳链接、截断、report/reply/batch |
-| Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker、project 解析 |
-| 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP、无 cwd ensure、项目清单、租约 |
-| 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器 |
+| Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、idle 释放槽位、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker、project 解析 |
+| 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP、无 cwd ensure、项目清单、租约、重置 generation/Worker 归档 |
+| 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 100 个用例，全部不需要模型调用。
+共 103 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
@@ -453,10 +453,16 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
    `bash` 的 `pwd` 是 project6，`printf > .super-agent-probe.txt` 成功写进 project6；
    UI 的 Router 在独立 workspace，所以这次任务走普通 Session（不是 subagent）。
 6. 连续发 3 个慢任务，中间快照 `working=3`，报告随后逐条回到 Router，验证真实
-   Worker 并发与容量限制。
-7. 关闭并重启 web，DSH 启动时自动打开的空白会话会被 `router.json` 的 `ui:true`
+   Worker 并发与容量限制；右侧活动列表实时出现 3 条 `Working` 任务。
+7. 5 个慢任务时前 4 个 `working`、第 5 个 `queued`；第 4 个完成后第 5 个自动
+   `working`，最终全部 `idle`，证明 idle 不占执行槽位。
+8. Worker Session 行与 `[super-agent]` trigger 用户气泡在浏览器中不可见；
+   Worker 结果只进入右侧活动列表和 Router 的最终回复。
+9. 点击「重置」：二次确认，切换新 dataDir generation，新会话空白、活动列表清空；
+   Worker 会话归档，面板不跳回工作区选择。
+10. 关闭并重启 web，DSH 启动时自动打开的空白会话会被 `router.json` 的 `ui:true`
    挡住；`ui/ensure` 恢复同一条 Router，历史消息仍在。
-8. 期间发现并修复：
+11. 期间发现并修复：
    - `resolveAgent` 恢复会话时不一定重发 `agent/created`，改为恢复后显式
      `maybeInstall`；
    - 旧进程释放 Session writer 有窗口，恢复需要有限重试；

@@ -63,6 +63,14 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 - UI 的 Router 在独立 workspace，用户项目相对它都是“跨项目”，因此 UI 发起的
   项目任务都用**目标项目的普通 Session**（可见、可审批、`workspace-write` 正确）；
   同项目 subagent 仍用于 CLI/headless 的项目 Router 或 Router 在自己目录里跑任务；
+- 面板右侧有**近期活动**：进行中的任务按状态排在前面，最近完成的任务折叠展示；
+  条目只来自 runtime.task，不显示 Worker Session、不伪造用户消息；
+- Worker 的普通 Session 和 Router 的 `[super-agent]` trigger 批处理不会出现在
+  左侧「近期活动」/聊天流里：前者按标题与会话 id 隐藏，后者按内部前缀隐藏。
+  Worker 结果只通过右侧活动列表和 Router 的最终回复体现；
+- 顶部「重置」会二次确认：中止当前 Worker、切到新的 `dataDir` generation、创建
+  新 Router 会话；旧任务归档、旧 Router 会话保留但不删除。侧栏只显示当前
+  Router，旧 Router 会话由 `workspaceSessions` 精确隐藏（仍可在搜索/历史中找回）；
 - 面板会显示 Router 状态、活跃 Worker/pending/task 数量；会话重启后通过
   `.dsh/super-agent/router.json` 指针恢复同一条 Router，而不是每次新建；
   UI 管理的指针带 `"ui": true`，因此 DSH 启动时自动打开的空白会话不会抢占
@@ -126,6 +134,7 @@ node bin/super-agent.mjs status --project /path/to/project
 | GET | `/api/super-agent/ui/state` | 面板状态：活跃 Router、项目清单、任务计数 |
 | POST | `/api/super-agent/ui/ensure` | 确保 Router 会话；body 可省略，或传 `{"cwd":"/abs/project"}` 显式指定运行目录 |
 | POST | `/api/super-agent/ui/focus` | 兼容脚本：设置旧版 focus project；面板已不再调用 |
+| POST | `/api/super-agent/ui/reset` | 中止 Worker、切换 generation、创建新 Router；面板「重置」使用 |
 
 后三个端点是面板内部接口；脚本也可以用它做轻量自动化。`ensure` 不要求 cwd：
 它会创建/恢复独立的 Super-agent Workspace 里的 Router，而不是任何用户项目；
@@ -383,8 +392,9 @@ queued → starting → working ⇄ idle / blocked / failed / interrupted / lost
 - `router.sessionId`：固定 Router 会话；留空表示本项目第一个根会话。
 - `superAgentHome`（profile 配置 / `DSH_SUPER_AGENT_HOME`）：独立 Super-agent
   Workspace 的绝对路径；默认在平台应用数据目录，见 UI 一节。
-- `worker.maxWorkers`：同时驻留的 Worker 上限；超出进入 `queued`。**idle 的 Worker
-  仍占槽位**，Router 应及时 `close` 已完成任务。
+- `worker.maxWorkers`：同时**执行中**（starting/working）的 Worker 上限；超出进入
+  `queued`。完成的 Worker 状态变为 idle，不再占执行槽位，后续 queued 任务会自动
+  启动；idle Worker 可保留供 steer/Thread 直通。Router 仍可用 `close` 释放它。
 - `worker.defaultCwd`：Router 自己也没选项目、dispatch 又不给 cwd 时的兜底。
   UI 没有目标项目选择器；正常路径是 Router 用 `project` 显式选目标。
 - `channels.<name>.maxWords`：`superagent_tell` 的硬上限；`0` 表示不限。
@@ -461,7 +471,7 @@ tail -F /path/to/project/.dsh/super-agent/outbox.jsonl
 npm test
 ```
 
-覆盖 100 个用例：
+覆盖 103 个用例：
 
 - 程序层过滤的所有分支；
 - 项目开关、配置合并、数据根安全边界、独立 workspace 边界标记；
@@ -469,11 +479,13 @@ npm test
 - Inline/Spill 批次预算、Worker 初始提示、字数、脱敏；
 - 链式召回的 trigger/thread/task/batch/report/reply 引用图；
 - 假宿主上的完整调度：去重、批处理、直通、多订阅者、报告、steer、close、
-  容量队列、Watchdog、恢复、inbox 轮询、outbox；
+  容量队列、idle 释放槽位、Watchdog、恢复、inbox 轮询、outbox；
 - 插件接线：工具/提示词注册、单 Router、subagent 跳过、HTTP 端点、租约释放；
 - UI 接线：`/ui/ensure` 通过通用 Session API 在独立 workspace 建 Router、
   无用户项目也能启动、注册 workspace、把 Router 挂进 workspace 会话组、项目清单
   排除独立 workspace、旧项目 Router 不抢占 UI、`/ui/focus` 兼容、复用；
+- 重置：新 generation 配置、旧 Worker 归档、旧 Router 保留、活动列表清空；
+- 浏览器 bundle：右侧活动列表、二次确认重置、Worker/trigger 展示层隐藏；
 - 项目解析：`superagent_projects` 清单、标题/id/path 唯一匹配、dispatch(project)；
 - 跨项目调度：普通 Session Worker 的创建、prompt 延迟、报告、关闭取消；
 - 浏览器 bundle 合约：单文件 loader、id、仅 require react、面板/侧栏/子槽注册；
@@ -498,6 +510,10 @@ npm test
   Worker 用普通 Session，`bash` 在 project6 写出探针文件（sandbox 生效）；
 - `superagent_tell` / worker report 回到 Router，面板计数与消息流同步；
 - 连续发 3 个慢任务，中间快照 `working=3`，证明真实 Worker 并发与容量调度；
+- 5 个慢任务下前 4 个 `working`、第 5 个 `queued`；第 4 个完成后第 5 个自动
+  `working`，最终 5 个都 `idle`，验证执行槽位释放与队列前进；
+- 右侧「近期活动」实时列出 working/queued/completed 与项目；Worker 会话行、
+  `[super-agent]` trigger 用户气泡在浏览器里为 0 个可见；
 - 面板没有 `<select>`；打开即对话；发 `auto-project` 请求后任务落到 project6，
   状态里的 `task.project=project6`、`cwd=.../project6`，证明 Router 自主选项目；
 - 用全新 DSH home（无 Router 指针、只有 project-ui-b）打开空白 Router：官方 hero
@@ -505,6 +521,8 @@ npm test
 - 设置 `DSH_SUPER_AGENT_HOME` 后，Router 的 `projectRoot` 是独立 workspace；它被
   注册为「Super-agent Workspace」，且从 `superagent_projects`/面板项目清单里排除；
   auto-project 任务仍然落到 project6；
+- 点击「重置」二次确认后，Router 切到新会话与新 dataDir generation，活动列表
+  清空，旧 Worker 被归档，页面仍留在 Super-agent 面板（不会跳回工作区选择）；
 - 停止 web 后重启，DSH 启动时新开的空白会话不会抢占 UI Router；
   `ui/ensure` 恢复带 `"ui": true` 指针的同一条 Router 会话，历史消息仍在。
 
@@ -518,13 +536,15 @@ npm test
   没有云端无状态计算，也没有跨设备 daemon。
 - **Worker 会话不跨进程恢复**：宿主重启后，任务标为 `interrupted` 并通知 Router；
   它可以根据 journal 里的 brief 决定重派。`interrupted` 不会自动重跑，避免重复副作用。
-  跨项目 Worker 是普通 Session，会留在目标项目的会话列表里，方便审计；插件不
-  删除、不自动归档它。
+  跨项目 Worker 是普通 Session，底层保留用于审计；Super-agent 面板在浏览器里
+  隐藏这些会话行，`close`/重置时归档它们，但从不删除。其他客户端仍可在“已归档”
+  视图查看。
 - **跨项目 Worker 的审批**：普通 Session 使用 DSH 的默认审批策略，不继承
   subagent 的 `approval: never`；需要无人值守时请在项目权限里配置。
-- **UI 管理的项目会被 pin**：一旦面板把 `router.json` 标记为 `"ui": true`，DSH
-  自动新开的空白根会话不会接管 Router；需要面板 ensure 恢复它。若要在该项目改用
-  CLI 驱动的 Router，请显式删除该指针（属于破坏性操作，需自行确认）或换项目。
+- **UI 管理的独立 workspace 会被 pin**：面板把独立 workspace 的 `router.json`
+  标记为 `"ui": true`；DSH 自动新开的空白根会话不会接管 Router，需要面板 ensure
+  恢复它。若要在同一目录改用 CLI 驱动的 Router，请显式处理该指针（破坏性操作，
+  需自行确认）或换目录。
 - **频道桥未内置**：outbox 是稳定接口，但真正的 IM/GitHub 发送由部署实现。
 - **Router 仍是模型**：程序层保证事件怎么来、去哪、何时合批；是否行动仍由
   Router 提示词与模型判断。`guardExecutionTools`（默认开启）能在机制上限制它亲自执行。
@@ -553,7 +573,7 @@ lib/
   protocol.js   共享协议常量
 bin/
   super-agent.mjs   CLI
-test/              100 个 node:test 用例
+test/              103 个 node:test 用例
 docs/
   design.md        实现细节与取舍
 ```

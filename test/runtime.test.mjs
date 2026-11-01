@@ -225,6 +225,22 @@ test('maxWorkers queues the next task until a slot opens', async () => {
   ctx.runtime.stop()
 })
 
+test('an idle completed worker frees the execution slot for the next task', async () => {
+  const ctx = setupRuntime({ config: { worker: { maxWorkers: 1 } } })
+  const first = ctx.runtime.dispatch({ title: 'First', brief: 'A' })
+  await tick()
+  const second = ctx.runtime.dispatch({ title: 'Second', brief: 'B' })
+  assert.equal(ctx.store.getTask(second.taskId).status, 'queued')
+
+  const child = [...ctx.children.values()][0]
+  child.finishTurn({ text: 'first done', turn: 1 })
+  await tick()
+  assert.equal(ctx.store.getTask(first.taskId).status, 'idle')
+  assert.equal(ctx.store.getTask(second.taskId).status, 'working')
+  assert.equal(ctx.subagents.spawns.length, 2)
+  ctx.runtime.stop()
+})
+
 test('watchdog marks a missing worker lost and reports to the router', async () => {
   const ctx = setupRuntime()
   const tid = threadId('im', 'team:dev')
