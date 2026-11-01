@@ -38,6 +38,8 @@ function fakeCordis() {
   const agents = new Map()
   const routes = new Map()
   const effects = []
+  /** 等待服务就绪的 inject 回调（模拟 cordis 的 provide 通知）。 */
+  const pending = []
   const scoped = {
     agents: {
       list: () => [...agents.values()],
@@ -66,7 +68,9 @@ function fakeCordis() {
       return scoped[name]
     },
     inject(names, callback) {
-      if (names.includes('connection')) callback(scoped)
+      // 与真 cordis 一致：依赖齐了就回调，否则等 provide 时再回调
+      if (names.every((name) => scoped[name] !== undefined)) callback(scoped)
+      else pending.push({ names, callback })
     },
     effect(factory) {
       const dispose = factory()
@@ -86,6 +90,18 @@ function fakeCordis() {
     agents,
     routes,
     effects,
+    /**
+     * 模拟某个插件注册服务（例如 awayNotify）：已有等待者时立刻回调它们，
+     * 与 cordis 的 `provide` 通知语义一致。
+     */
+    provide(name, value) {
+      scoped[name] = value
+      for (const entry of [...pending]) {
+        if (!entry.names.every((dependency) => scoped[dependency] !== undefined)) continue
+        pending.splice(pending.indexOf(entry), 1)
+        entry.callback(scoped)
+      }
+    },
     emit(event, payload) {
       for (const handler of [...(handlers.get(event) ?? [])]) handler(payload)
     },
@@ -609,3 +625,108 @@ test('UI ensure initializes a bare project with the minimal enable config', asyn
   assert.equal(sys.agents.get(body.sessionId).tools.size, 7)
   sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
 })
+
+// ── 决策 1：把 worker 会话登记给 dsh-away-notify ────────────────────────────
+//
+// worker 是普通 Session（header 没有 origin / delegationDepth），away-notify 只能按
+// 标题前缀 `Super-agent worker · …` 兜底识别；用户一改名就漏。这里验证由创建方主动
+// 登记（awayNotify.markInternal）：创建时增量登记、关闭时释放、服务缺失时静默降级、
+// 服务晚到时补登记。
+
+/** 一个假的 awayNotify 服务：记录登记/释放。 */
+function fakeAwayNotify() {
+  const calls = []
+  const released = []
+  return {
+    version: 1,
+    calls,
+    released,
+    markInternal(sessionId, reason) {
+      calls.push([sessionId, reason])
+      return () => {
+        released.push(sessionId)
+        return true
+      }
+    },
+  }
+}
+
+/**
+ * 跨项目 worker 的最小装置：独立 workspace（Router）+ 目标项目 alpha。
+ *
+ * @param {{ away?: object }} [options] away 服务；不传表示 away-notify 没装。
+ * @returns {Promise<object>} 装置与本次 dispatch 出来的 worker 信息。
+ */
+async function workerRig({ away } = {}) {
+  const alpha = project()
+  const home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-home-away-'))
+  const sys = fakeCordis()
+  if (away !== undefined) sys.provide('awayNotify', away)
+  sys.scoped.workspaceRegistry = {
+    list: () => [{ id: 'ws-alpha', title: 'alpha', path: alpha, sessionIds: [] }],
+    create: (path, title) => ({ id: 'ws-home', title, path, attachSession: async () => undefined }),
+    archiveSession: async () => undefined,
+  }
+  sys.scoped.sessionController = {
+    async create({ cwd, sessionId }) {
+      const agent = fakeAgent({ id: sessionId, cwd })
+      sys.agents.set(agent.id, agent)
+      sys.emit('agent/created', { agent })
+      return { sessionId: agent.id }
+    },
+    async resolveAgent(id) {
+      const agent = sys.agents.get(id)
+      return agent === undefined ? { error: { message: 'missing' } } : { agent }
+    },
+    async prompt() {},
+    async rename() {},
+  }
+  apply(sys.root, { superAgentHome: home })
+  const ensure = sys.routes.get('/api/super-agent/ui/ensure')
+  const router = await (await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: '{}',
+  }))).json()
+  const tools = sys.agents.get(router.sessionId).tools
+  const dispatch = await tools.get('superagent_dispatch').execute({
+    title: 'away probe',
+    brief: 'probe the notification registration',
+    project: 'alpha',
+  }, {})
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 100))
+  const state = await (await sys.routes.get('/api/super-agent/ui/state').fetch(
+    new Request('http://127.0.0.1/api/super-agent/ui/state'),
+  )).json()
+  const task = state.router.status.tasks.find((candidate) => candidate.title === 'away probe')
+  return { sys, alpha, home, router, tools, dispatch, task, workerId: task?.workerSessionId }
+}
+
+test('worker 创建时登记给 awayNotify，任务关闭时释放', async () => {
+  const away = fakeAwayNotify()
+  const rig = await workerRig({ away })
+  assert.match(rig.workerId, /^session-/)
+  assert.deepEqual(away.calls, [[rig.workerId, 'super-agent-worker']], '创建时登记一次（幂等）')
+  assert.equal(away.released.length, 0)
+
+  await rig.tools.get('superagent_close').execute({ task_id: rig.task.id }, {})
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 100))
+  assert.deepEqual(away.released, [rig.workerId], '任务关闭后必须撤销登记，不能长期占着')
+
+  rig.sys.emit('agent/disposed', { agent: rig.sys.agents.get(rig.router.sessionId) })
+});
+
+test('awayNotify 缺失时 worker 照常创建（静默降级，不抛）', async () => {
+  const rig = await workerRig({})
+  assert.match(rig.workerId, /^session-/, '没有 away-notify 也要正常派工')
+  assert.ok(rig.sys.agents.get(rig.workerId) !== undefined)
+  rig.sys.emit('agent/disposed', { agent: rig.sys.agents.get(rig.router.sessionId) })
+});
+
+test('awayNotify 晚于 super-agent 就绪：补登记已经存在的 worker', async () => {
+  const rig = await workerRig({})
+  assert.match(rig.workerId, /^session-/)
+  const away = fakeAwayNotify()
+  rig.sys.provide('awayNotify', away)
+  assert.deepEqual(away.calls, [[rig.workerId, 'super-agent-worker']], '服务就绪时应补登记活着的 worker')
+  rig.sys.emit('agent/disposed', { agent: rig.sys.agents.get(rig.router.sessionId) })
+});
