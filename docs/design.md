@@ -440,24 +440,28 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
    模型选择、Workspace Write 与消息流都来自官方组件。
 2. 页面打开时 `/ui/ensure` 不传 cwd，自动从宿主项目清单/旧指针恢复 Router；
    `owner.json` / `router.json` 写入。面板没有 `<select>`，不需要先选工作区。
-3. 直接输入自然语言任务；Router 侧的项目工具可见宿主项目清单，fake LLM 用
+3. 全新 DSH home（无 Router 指针、一个 workspace）下打开空白 Router：面板固定
+   active，官方 hero 不渲染，WorkspaceChip/工作区选择列表为 0，直接出现 composer。
+4. 直接输入自然语言任务；Router 侧的项目工具可见宿主项目清单，fake LLM 用
    `superagent_dispatch(project: "project6")` 选中 project6，task.cwd=project6。
-4. 跨项目 Worker 的 `workerSessionId` 以 `session-` 开头（普通 Session），
+5. 跨项目 Worker 的 `workerSessionId` 以 `session-` 开头（普通 Session），
    `bash` 的 `pwd` 是 project6，`printf > .super-agent-probe.txt` 成功写进 project6；
    同项目任务仍使用 subagent。
-5. 连续发 3 个慢任务，中间快照 `working=3`，报告随后逐条回到 Router，验证真实
+6. 连续发 3 个慢任务，中间快照 `working=3`，报告随后逐条回到 Router，验证真实
    Worker 并发与容量限制。
-6. 关闭并重启 web，DSH 启动时自动打开的空白会话会被 `router.json` 的 `ui:true`
+7. 关闭并重启 web，DSH 启动时自动打开的空白会话会被 `router.json` 的 `ui:true`
    挡住；`ui/ensure` 恢复同一条 Router，历史消息仍在。
-7. 期间发现并修复：
+8. 期间发现并修复：
    - `resolveAgent` 恢复会话时不一定重发 `agent/created`，改为恢复后显式
      `maybeInstall`；
    - 旧进程释放 Session writer 有窗口，恢复需要有限重试；
    - subagent 的 `header.cwd` 是父项目，跨项目写会被 sandbox 拒绝；因此引入
      普通 Session Worker，并把它们登记进 `reservedWorkerSessions`，防止目标项目
      的插件把它们误认成 Router；
-   - 面板不能把空/非空会话简单当 hero，否则真实历史会被欢迎页遮住；只有
-     `session.blank === true` 才用 hero，摘要未到则保持 active；
+   - 官方 conversation 的 hero（空白会话欢迎态）自带 WorkspaceChip，点开就是
+     工作区选择列表；即使自定义面板没有 select，用户仍会看到“选工作区”。面板
+     固定用 `phase: "active"`、`hero: false`，空白会话直接显示官方 composer，
+     项目选择完全交给 Router；
    - 重启时 DSH 会先开一条空白根会话；若它抢在 ensure 前成为 Router，历史就会
      丢在旧会话里。UI 指针标记 `ui:true`，`maybeInstall` 跳过其他空白会话，只有
      ensure 能恢复/创建 UI Router；

@@ -50,7 +50,9 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 
 - 面板 retain 一条普通 DSH 根会话，本插件把 Router 提示词和七个工具装上去；
 - 消息流、停止按钮、模型选择、审批、工具卡片全部复用官方 `conversation.content`；
-- **没有「目标项目」选择器**。打开面板就直接说话；Router 通过
+- **没有「目标项目」选择器**。官方 conversation 的空会话 hero 自带 WorkspaceChip，
+  点开仍是工作区列表；因此面板固定使用 `phase: "active"`，不渲染官方 hero。
+  打开面板就直接说话；Router 通过
   `superagent_projects` 查看左侧栏已有项目，并从用户描述中自主选择目标，
   再用 `superagent_dispatch(project: "...")` 在目标项目里发起 Worker。用户不需要
   先选工作区，也不需要把项目路径贴进对话；
@@ -477,6 +479,8 @@ npm test
 - 连续发 3 个慢任务，中间快照 `working=3`，证明真实 Worker 并发与容量调度；
 - 面板没有 `<select>`；打开即对话；发 `auto-project` 请求后任务落到 project6，
   状态里的 `task.project=project6`、`cwd=.../project6`，证明 Router 自主选项目；
+- 用全新 DSH home（无 Router 指针、只有 project-ui-b）打开空白 Router：官方 hero
+  未渲染，WorkspaceChip/工作区列表为 0 个，直接显示官方 composer；
 - 停止 web 后重启，DSH 启动时新开的空白会话不会抢占 UI Router；
   `ui/ensure` 恢复带 `"ui": true` 指针的同一条 Router 会话，历史消息仍在。
 

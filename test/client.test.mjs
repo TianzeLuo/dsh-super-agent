@@ -44,4 +44,5 @@ test('client has no project picker or focus endpoint', () => {
   assert.doesNotMatch(client, /<select|target project|目标项目/i)
   assert.match(client, /postJson\(ROUTES\.ensure, \{\}\)/)
   assert.match(client, /projectsAuto/)
+  assert.doesNotMatch(client, /phase:\s*'hero'|hero:\s*true|useSessionBlank/)
 })
