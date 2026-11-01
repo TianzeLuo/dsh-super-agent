@@ -77,6 +77,19 @@
 11. **事件正文默认脱敏**：`redact: true` 时，常见 key/token 在进入 journal 前被替换。
 12. **失败不连坐**：配置错误、目录不可写、端口被占、服务缺失，都只让插件对
     本次会话保持关闭，不影响 `agent/created`。
+13. **Worker 的通知抑制由创建方登记**：worker 是普通 Session，`dsh-away-notify`
+    只能按标题前缀兜底识别，用户一改名就失效。因此创建 worker 时调
+    `awayNotify.markInternal(sessionId, 'super-agent-worker')`（`lib/internal-sessions.js`），
+    关闭/归档/agent 销毁时释放；`awayNotify` 缺席或没有该方法时**静默降级**，
+    worker 创建/关闭完全不受影响，通知侧退回标题前缀。
+14. **面板来源由面板插件显式登记**：`dsh-away-notify` 点通知时要判断「这条会话在哪个
+    主区域面板里」，否则只能靠启发式——面板被选中后 15 秒内第一个新出现的 retain 来源。
+    面板从没打开过、或同时有别的插件 retain 会话时，启发式会认错。因此浏览器半部在
+    `apply` 时调 `awayNotifyPanels.register({ panelId: 'super-agent', sources: ['superAgentUi'] })`
+    （`lib/client.js` 的 `registerAwayNotifyPanel`），注册句柄挂在 `scope.effect` 上，
+    插件卸载/热重载时自动注销；`awayNotifyPanels` 缺席、没有 `register`、调用抛错一律
+    **静默降级**，面板照常打开，最坏退回自动学习。`PANEL_ID` 与 `PANEL_SOURCE` 是
+    「槽注册 / retain / 登记」三处共用的常量，改名只需改一处。
 
 ## 4. 事件 intake 算法
 
@@ -381,6 +394,9 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 - 不要在浏览器里直接写 journal；所有写入走 runtime/ensure；
 - 不要把 Router 会话换成自定义消息协议；继续用 `conversation.content`，否则会丢掉
   工具、审批、停止与模型选择。
+- 面板的 retain 来源（`PANEL_SOURCE`）同时用于 `sessions.retain()` 和向 `dsh-away-notify`
+  的 `awayNotifyPanels.register()` 登记；改来源名或面板 key 时改常量，别在别处写死名字
+  （见不变量 14）。
 
 ## 15. 与官方原型的差异
 

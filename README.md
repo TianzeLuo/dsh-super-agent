@@ -541,6 +541,16 @@ npm test
   视图查看。
 - **跨项目 Worker 的审批**：普通 Session 使用 DSH 的默认审批策略，不继承
   subagent 的 `approval: never`；需要无人值守时请在项目权限里配置。
+- **Worker 的通知抑制需要人工登记**：worker 是普通 Session，`dsh-away-notify` 只能按
+  标题前缀兜底识别，所以本插件在创建 worker 时调 `awayNotify.markInternal()`、关闭时释放
+  （`lib/internal-sessions.js`）。away-notify 未装或版本太旧时静默降级，通知侧退回标题
+  前缀；详见 `docs/design.md` 不变量 13。
+- **面板点击落点靠显式登记**：浏览器半部会向 `dsh-away-notify` 注册
+  `awayNotifyPanels.register({ panelId: 'super-agent', sources: ['superAgentUi'] })`，所以
+  点 Router 会话的通知会直接打开本面板，而不是退回主视图（不注册时它只能靠「面板被选中后
+  15 秒内第一个新来源」的猜测）。away-notify 未装或没有该接口时静默降级，面板照常打开；
+  句柄随插件卸载注销。改 `PANEL_ID` / `PANEL_SOURCE` 时登记会跟着变，详见
+  `docs/design.md` 不变量 14。
 - **UI 管理的独立 workspace 会被 pin**：面板把独立 workspace 的 `router.json`
   标记为 `"ui": true`；DSH 自动新开的空白根会话不会接管 Router，需要面板 ensure
   恢复它。若要在同一目录改用 CLI 驱动的 Router，请显式处理该指针（破坏性操作，
