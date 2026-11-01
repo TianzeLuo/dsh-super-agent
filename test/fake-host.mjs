@@ -219,6 +219,7 @@ export function setupRuntime(options = {}) {
   const router = options.router ?? fakeRouter(project.root)
   const subagents = options.subagents ?? fakeSubagents(children)
   const sessionWorkers = options.sessionWorkers ?? fakeSessionWorkers(children)
+  const projects = options.projects ?? (() => [])
   const timers = options.timers ?? fakeTimers()
   const config = mergeConfig(DEFAULTS, options.config ?? {})
   const runtime = new SuperAgentRuntime({
@@ -229,6 +230,7 @@ export function setupRuntime(options = {}) {
     dataDir: project.dataDir,
     subagents,
     sessionWorkers,
+    projects,
     getAgent: (id) => children.get(id),
     logger: { warn: () => undefined, info: () => undefined },
     timers,

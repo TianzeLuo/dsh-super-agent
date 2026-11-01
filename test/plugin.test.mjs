@@ -170,6 +170,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
   assert.deepEqual([...first.tools.keys()].sort(), [
     'superagent_close',
     'superagent_dispatch',
+    'superagent_projects',
     'superagent_recall',
     'superagent_status',
     'superagent_steer',
@@ -215,7 +216,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
   const third = fakeAgent({ id: 'session-3', cwd: root })
   sys.agents.set(third.id, third)
   sys.emit('agent/created', { agent: third })
-  assert.equal(third.tools.size, 6)
+  assert.equal(third.tools.size, 7)
   sys.emit('agent/disposed', { agent: third })
 })
 
@@ -321,7 +322,7 @@ test('UI ensure creates a Router through the generic Session API and focus updat
   assert.equal(pointer.ui, true)
   assert.equal(pointer.sessionId, body.sessionId)
   const router = sys.agents.get(body.sessionId)
-  assert.equal(router.tools.size, 6)
+  assert.equal(router.tools.size, 7)
 
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
@@ -358,6 +359,46 @@ test('UI ensure creates a Router through the generic Session API and focus updat
   sys.emit('agent/disposed', { agent: router })
 })
 
+test('UI ensure without cwd chooses a project from the host inventory', async () => {
+  const root = project()
+  const sys = fakeCordis()
+  sys.scoped.workspaceRegistry = {
+    list: () => [{ id: 'ws-1', title: 'alpha', path: root, sessionIds: [] }],
+  }
+  sys.scoped.sessionController = {
+    async create({ cwd, sessionId }) {
+      const agent = fakeAgent({ id: sessionId, cwd })
+      sys.agents.set(agent.id, agent)
+      sys.emit('agent/created', { agent })
+      return { sessionId: agent.id }
+    },
+    async resolveAgent(id) {
+      const agent = sys.agents.get(id)
+      return agent === undefined ? { error: { message: 'missing' } } : { agent }
+    },
+    async rename() {},
+  }
+  apply(sys.root)
+  const ensure = sys.routes.get('/api/super-agent/ui/ensure')
+  const response = await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: '{}',
+  }))
+  const body = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(body.ok, true)
+  assert.equal(body.projectRoot, root)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 7)
+  const projectTool = await sys.agents.get(body.sessionId).tools.get('superagent_projects').execute({}, {})
+  assert.deepEqual(projectTool.projects.map((project) => project.title), ['alpha'])
+  const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
+    new Request('http://127.0.0.1/api/super-agent/ui/state'),
+  )
+  const stateBody = await state.json()
+  assert.deepEqual(stateBody.projects.map((project) => project.title), ['alpha'])
+  sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
+})
+
 test('UI ensure initializes a bare project with the minimal enable config', async () => {
   const root = bareProject()
   const sys = fakeCordis()
@@ -389,6 +430,6 @@ test('UI ensure initializes a bare project with the minimal enable config', asyn
   const config = JSON.parse(readFileSync(join(root, '.dsh', 'super-agent.json'), 'utf8'))
   assert.equal(config.enabled, true)
   assert.equal(config.version, 1)
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 6)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 7)
   sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
 })

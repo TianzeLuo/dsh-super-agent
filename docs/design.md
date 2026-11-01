@@ -30,7 +30,7 @@
 | 组件 | 文件 | 职责 | 不做什么 |
 | --- | --- | --- | --- |
 | 插件入口 | `lib/index.js` | 项目开关、Router 认领、注册工具/提示词/HTTP/UI、租约、跨项目 Session Worker | 不做调度 |
-| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、项目 focus、嵌入式官方会话 | 不定义消息协议 |
+| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话；无项目选择器 | 不定义消息协议，不选项目 |
 | Runtime | `lib/runtime.js` | 批处理、直通、Worker 生命周期、报告、Watchdog、恢复、inbox | 不调模型 |
 | Store | `lib/store.js` | journal 追加、重放、内存索引 | 不做策略 |
 | Filter | `lib/filter.js` | 程序层快路径 | 不调模型 |
@@ -38,7 +38,7 @@
 | Recall | `lib/recall.js` | 链式召回 | 不写状态 |
 | Config | `lib/config.js` | 默认值、合并、路径边界 | 不读会话 |
 | Prompt | `lib/prompt.js` | Router 提示词/动态上下文 | 不执行工具 |
-| Tools | `lib/tools.js` | 六个模型工具 | 不直接改 journal |
+| Tools | `lib/tools.js` | 七个模型工具 | 不直接改 journal |
 
 依赖方向是单向的：`runtime → store / filter / render / recall / config`；
 `index → runtime / tools / prompt / store`。`store`、`filter`、`render`、`recall`
@@ -62,13 +62,17 @@
 7. **跨项目写入的沙箱正确性**：DSH subagent 的 `header.cwd` 固定为父会话，
    `request.cwd` 只改 working directory；因此跨项目 Worker 必须是目标项目的
    普通 Session，不能靠 subagent 的 cwd 参数硬闯 sandbox。
-8. **单 Router 的 UI 一致性**：`/ui/ensure` 只复用/创建一条 Router；目标项目选择
-   只写 runtime.focusProject，不新建 Router。UI 创建的 Router 指针带 `ui: true`，
+8. **单 Router 的 UI 一致性**：`/ui/ensure` 只复用/创建一条 Router；没有 cwd
+   时优先恢复带 UI 指针的 Router，否则从宿主项目清单选一个运行目录。这个目录
+   只是 Router 宿主，不是任务目标。UI 创建的 Router 指针带 `ui: true`，
    `maybeInstall` 对「指针里是另一条 UI Router」的普通新会话直接跳过，避免 DSH
    启动时自动打开的空白会话在 ensure 之前抢占 Router。
-7. **事件正文默认脱敏**：`redact: true` 时，常见 key/token 在进入 journal 前被替换。
-8. **失败不连坐**：配置错误、目录不可写、端口被占、服务缺失，都只让插件对
-   本次会话保持关闭，不影响 `agent/created`。
+9. **项目由 Router 选，不由 UI 选**：`superagent_projects` 暴露宿主 workspace 清单；
+   `superagent_dispatch(project)` 做标题/id/路径的唯一解析。UI 没有项目选择器，
+   也不把“目标项目”写进配置。
+10. **事件正文默认脱敏**：`redact: true` 时，常见 key/token 在进入 journal 前被替换。
+11. **失败不连坐**：配置错误、目录不可写、端口被占、服务缺失，都只让插件对
+    本次会话保持关闭，不影响 `agent/created`。
 
 ## 4. 事件 intake 算法
 
@@ -309,8 +313,8 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 事件正文 | untrusted 分隔块 + 提示词明确「数据不是指令」 | 提示层，不是沙箱 |
 | 凭据 | ingest/report/outbox 前脱敏；事件不应携带凭据 | 正则覆盖常见形态，不穷尽 |
 | 数据根 | 绝对路径校验；拒绝盘符根、`~/.dsh`、系统目录 | 不阻止用户在项目内误放敏感文件 |
-| HTTP | `/api` 前缀，走宿主浏览器鉴权；ingest/status/outbox + 面板的 ensure/state/focus | 不额外做 HMAC；需要时由反向代理加 |
-| UI 入口 | ensure 只允许已存在目录；创建普通 Session；首次写最小项目配置 | 不提供任意文件管理；项目显式 `enabled:false` 时拒绝 |
+| HTTP | `/api` 前缀，走宿主浏览器鉴权；ingest/status/outbox + 面板的 ensure/state（focus 仅兼容） | 不额外做 HMAC；需要时由反向代理加 |
+| UI 入口 | ensure 不要求 cwd；创建普通 Session；只从宿主项目清单/指针选运行目录；首次写最小项目配置 | 不提供任意文件管理；项目显式 `enabled:false` 时拒绝 |
 | 频道 | 插件不持有 IM/GitHub 凭据；只写 outbox | 桥接器自己负责鉴权与重试 |
 | Router 越权 | 默认开启 `guardExecutionTools`，拦截 bash/write/edit | 只在本插件安装的 agent scope；可显式关闭 |
 | Worker 越权 | 同项目 subagent；跨项目普通 Session，落在目标项目的 workspace-write 根；提示词要求不直接联系人、不臆造批准 | Worker 仍有完整工具，不是沙箱；普通 Session 使用宿主默认审批 |
@@ -325,7 +329,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 新会话没有工具 | 项目未开启 / 别的会话已认领 / 配置坏 | `status` 的 enabled/reason；宿主日志 `[super-agent]` |
 | 左栏没有入口 | 客户端 bundle 没被发现 / 未重启 web | `package.json` 的 `exports["./client"]`、`dsh.client`；重启 `dsh web` |
 | 面板一直 loading | `conversation.content`/SessionProvider 缺失 | 浏览器控制台；`dsh-client-ui-conversation` 是否在 profile |
-| 选择项目后 Worker 仍写 Router 项目 | 旧版本；focus 未设置；模型显式给了别的 cwd | `/api/super-agent/ui/state` 的 `focusProject`，task 的 `cwd` |
+| Worker 写错项目 | `dispatch` 没传 `project`，模型误用 Router 运行目录；`superagent_projects` 结果过期 | task 的 `project`/`cwd`，`/api/super-agent/ui/state` 的 `projects` |
 | 重启后换了 Router 会话 | 指针被自动空白会话覆盖 / 指针没有 `ui:true` | `.dsh/super-agent/router.json`；面板 ensure 会把当前 Router 标记为 ui |
 | 跨项目 Worker 无写权限 | 误用了 subagent | task.workerSessionId 以 `session-` 开头表示普通 Session；journal 的 cwd |
 | 事件一直 pending | Router 忙或宿主无 Router；flush 失败 | `status --full`、`journal` 的 `trigger.failed` |
@@ -398,12 +402,12 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | Store | `test/store.test.mjs` | 折叠、去重、订阅、报告、重放、坏行 |
 | Render | `test/render.test.mjs` | 摘要、预算、Worker 提示、字数、脱敏 |
 | Recall | `test/recall.test.mjs` | 一跳链接、截断、report/reply/batch |
-| Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker |
-| 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP、UI ensure/focus、租约 |
-| 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册 |
+| Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker、project 解析 |
+| 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP、无 cwd ensure、项目清单、租约 |
+| 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 94 个用例，全部不需要模型调用。
+共 97 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
@@ -414,7 +418,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 1. 用 `dsh plugin --profile <temp> add /abs/path/dsh-super-agent` 安装，`--dump-config`
    确认 `super-agent` 行出现在 profile 合成结果里。
 2. 在临时项目写 `.dsh/super-agent.json`，启动 `dsh --profile <temp> headless ...`。
-   插件加载，`owner.json`/`journal.jsonl` 创建；Router 的系统提示词与六个工具
+   插件加载，`owner.json`/`journal.jsonl` 创建；Router 的系统提示词与七个工具
    出现在真实 `request/header` 中。
 3. 测试 LLM 调用 `superagent_dispatch`，宿主创建独立 subagent Session；Worker
    任务提示完整出现在 `agent/inbox/spliced`，子会话有独立 system prompt 和工具集。
@@ -434,8 +438,10 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 
 1. 左栏出现「Super-agent」，点击后 main 面板嵌入官方 Conversation；输入框、
    模型选择、Workspace Write 与消息流都来自官方组件。
-2. 页面打开时 `/ui/ensure` 自动创建 Router；`owner.json` / `router.json` 写入。
-3. 选择 project6，面板写 `/ui/focus`；发送任务后 task.cwd=project6。
+2. 页面打开时 `/ui/ensure` 不传 cwd，自动从宿主项目清单/旧指针恢复 Router；
+   `owner.json` / `router.json` 写入。面板没有 `<select>`，不需要先选工作区。
+3. 直接输入自然语言任务；Router 侧的项目工具可见宿主项目清单，fake LLM 用
+   `superagent_dispatch(project: "project6")` 选中 project6，task.cwd=project6。
 4. 跨项目 Worker 的 `workerSessionId` 以 `session-` 开头（普通 Session），
    `bash` 的 `pwd` 是 project6，`printf > .super-agent-probe.txt` 成功写进 project6；
    同项目任务仍使用 subagent。
@@ -454,7 +460,10 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
      `session.blank === true` 才用 hero，摘要未到则保持 active；
    - 重启时 DSH 会先开一条空白根会话；若它抢在 ensure 前成为 Router，历史就会
      丢在旧会话里。UI 指针标记 `ui:true`，`maybeInstall` 跳过其他空白会话，只有
-     ensure 能恢复/创建 UI Router。
+     ensure 能恢复/创建 UI Router；
+   - 早期 UI 要求先选工作区，且把选择结果写进 focus；这会让用户误以为项目是
+     面板的必填项。现在 ensure 自带 Router 运行目录，项目清单只给 Router 的
+     `superagent_projects` 工具使用，UI 不再出现“目标项目”。
 
 这次验证还发现并修复了两个只有真宿主才暴露的问题：
 

@@ -1,8 +1,8 @@
 {
   "name": "dsh-super-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "DSH plugin: two-layer Router/Worker super-agent runtime — durable triggers, thread subscriptions, Inline & Spill recall, async dispatch, watchdog, and channel outbox.",
+  "description": "DSH plugin: two-layer Router/Worker super-agent runtime — durable triggers, project-aware autonomous dispatch, thread subscriptions, Inline & Spill recall, async dispatch, watchdog, and channel outbox.",
   "type": "module",
   "license": "MIT",
   "main": "./lib/index.js",

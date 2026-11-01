@@ -38,3 +38,10 @@ test('client registers the sidebar entry, main panel and session-scoped child', 
   assert.match(client, /\/api\/super-agent\/ui\/ensure/)
   assert.match(client, /conversation\.content/)
 })
+
+test('client has no project picker or focus endpoint', () => {
+  assert.doesNotMatch(client, /FOCUS_KEY|ROUTES\.focus|sa-project-label/)
+  assert.doesNotMatch(client, /<select|target project|目标项目/i)
+  assert.match(client, /postJson\(ROUTES\.ensure, \{\}\)/)
+  assert.match(client, /projectsAuto/)
+})

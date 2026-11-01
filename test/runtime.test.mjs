@@ -562,6 +562,36 @@ test('cross-project dispatch uses an ordinary Session worker so the target proje
   ctx.runtime.stop()
 })
 
+test('project registry resolves titles and dispatch(project) targets that project', async () => {
+  const local = fakeProject()
+  const other = fakeProject()
+  const ctx = setupRuntime({
+    project: local,
+    projects: () => [
+      { id: 'p-local', title: 'Alpha', path: local.root },
+      { id: 'p-other', title: 'Beta', path: other.root },
+      { id: 'p-other-duplicate', title: 'Beta', path: local.root },
+    ],
+  })
+  assert.deepEqual(ctx.runtime.listProjects().map((project) => project.title), ['Alpha', 'Beta'])
+  const dispatched = ctx.runtime.dispatch({
+    title: 'Autonomous target',
+    brief: 'Use the Beta project selected by the Router',
+    project: 'beta',
+  })
+  await tick()
+  assert.equal(ctx.store.getTask(dispatched.taskId).project, 'Beta')
+  assert.equal(ctx.store.getTask(dispatched.taskId).cwd, other.root)
+  assert.equal(ctx.sessionWorkers.calls.length, 1)
+  assert.equal(ctx.sessionWorkers.calls[0].spec.cwd, other.root)
+  ctx.runtime.close({ taskId: dispatched.taskId, reason: 'done' })
+  assert.throws(
+    () => ctx.runtime.dispatch({ title: 'Unknown', brief: 'Unknown project', project: 'nope' }),
+    (error) => error instanceof RuntimeInputError && /no project matched/.test(error.message),
+  )
+  ctx.runtime.stop()
+})
+
 test('same-project dispatch keeps the isolated subagent path', async () => {
   const ctx = setupRuntime()
   const dispatched = ctx.runtime.dispatch({ title: 'Local task', brief: 'Stay in this project' })
