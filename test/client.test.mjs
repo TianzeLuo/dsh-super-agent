@@ -58,6 +58,8 @@ test('client has no project picker or focus endpoint', () => {
   assert.match(client, /sa-icon-button/)
   assert.match(client, /--dsw-alias-interactive-bg-hover/)
   assert.match(client, /sa-header-action/)
+  assert.match(client, /data-slot="conversation\.session"\]:empty/)
+  assert.match(client, /sa-conversation/)
   assert.doesNotMatch(client, /▾|✕|‹|＋|✓/)
 })
 
