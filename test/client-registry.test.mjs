@@ -218,3 +218,10 @@ test('retain 与注册共用同一个来源常量，改名字不会错位', () =
   assert.match(source, /\{ panelId: PANEL_ID, sources: \[PANEL_SOURCE\] \}/)
   assert.doesNotMatch(source, /source: 'superAgentUi'/, 'retain 里不该再硬编码来源名')
 })
+
+test('面板表面使用宿主真实主题 token，深色模式不会退化成白底', () => {
+  assert.match(source, /--dsw-alias-bg-layer-1/, 'surfaces should use the host layer token')
+  assert.match(source, /--dsw-alias-label-primary/, 'text should use the host label token')
+  assert.match(source, /const T = \{/)
+  assert.doesNotMatch(source, /var\(--dsw-alias-(bg-primary|bg-secondary|bg-elevated|fg-primary|accent)\b/, 'these token names do not exist in DSH and fall back to light-only colors')
+})

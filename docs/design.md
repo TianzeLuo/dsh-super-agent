@@ -93,7 +93,11 @@
     插件卸载/热重载时自动注销；`awayNotifyPanels` 缺席、没有 `register`、调用抛错一律
     **静默降级**，面板照常打开，最坏退回自动学习。`PANEL_ID` 与 `PANEL_SOURCE` 是
     「槽注册 / retain / 登记」三处共用的常量，改名只需改一处。
-15. **内部 Worker 行不随面板卸载而泄露**：只把隐藏 CSS 放在面板里不够——打开 Worker
+15. **主题跟随宿主，而不是画死颜色**：面板、详情卡、抽屉、输入框和按钮只使用
+    DSH 公开的 `--dsw-alias-bg-base/layer-1/layer-2`、`--dsw-alias-label-*` 和
+    `--dsw-alias-border-l*`；禁止再用 `--dsw-alias-bg-primary` 之类不存在的 token
+    配白底 fallback。旧宿主缺 token 时退回 `Canvas`/`CanvasText`，随浏览器 color-scheme。
+16. **内部 Worker 行不随面板卸载而泄露**：只把隐藏 CSS 放在面板里不够——打开 Worker
     聊天会卸载面板，侧栏立刻恢复显示。浏览器半部在 `document.head` 放一份持久 style，
     并按 `Super-agent worker ·` 标题前缀给旧 generation 的行打标记；隐藏规则和观察器
     挂在 `apply` 上，不在组件卸载时移除。
@@ -505,7 +509,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 160 个用例，全部不需要模型调用。
+共 161 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录

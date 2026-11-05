@@ -29,6 +29,7 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
   - allowlist：只允许 Router 从这里选择 Worker 模型；
   - 每个模型可以限制 reasoning efforts，并指定默认 effort；
   - 「跟随宿主全部模型」清空 allowlist；保存写到项目配置。
+- 面板、活动详情、模型/规则/定时抽屉全部使用 DSH 主题 token，跟随系统或宿主切换浅色/深色。
 - 「Rules」维护长期工作约定：全局或项目、追加或覆盖全局；可停用/编辑/删除。
 - 「Schedules」创建和取消定时唤醒：一次、每日、每周、Cron 或绝对时间；可
   「立即执行」一次。上限由 `schedule.maxActive` 控制。
