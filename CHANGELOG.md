@@ -4,6 +4,13 @@
 
 ### Added
 
+- **composer 状态徽标**：注册 `conversation.input.left`（会话级 list 槽），在聊天输入区
+  左端显示「运行中 N · 未读 M」。计数复用 `/api/super-agent/ui/state`（`activeWorkers`
+  与 `unreadTotal`），没有新协议、没有额外端点；两项都为 0 时不渲染、不占位。点击回到
+  `super-agent` 面板（`layout.selectPanel`，服务缺席时静默）。样式全内联且只用
+  `currentColor`/中性边框，因此不装任何皮肤也正常显示；侧栏入口的未读气泡与徽标共用
+  同一条 4 秒轮询和同一个计数器，不再各发一份请求。
+
 - **原生目标（objective）**：`superagent_goal` 用「客观目标 + 里程碑 + 显式检查节奏」表达
   长期目标，状态存 journal（`objective.created/updated/checked/closed`，旧版本忽略、
   旧 journal 无需迁移）。推进只来自三种来源：到点的宿主 schedule 检查、挂在目标上的

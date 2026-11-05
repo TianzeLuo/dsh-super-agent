@@ -34,6 +34,7 @@ test('client registers the sidebar entry, main panel and session-scoped child', 
   assert.match(client, /name: 'sidebar\.panellist'/)
   assert.match(client, /name: 'main'/)
   assert.match(client, /CONVERSATION_SLOT/)
+  assert.match(client, /conversation\.input\.left/)
   assert.match(client, /scope: 'session'/)
   assert.match(client, /\/api\/super-agent\/ui\/ensure/)
   assert.match(client, /\/api\/super-agent\/ui\/reset/)
