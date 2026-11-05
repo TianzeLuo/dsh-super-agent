@@ -15,11 +15,24 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 ## UI
 
 - 直接输入任务；Router 通过 `superagent_projects` 选择项目并派 Worker。
-- 右侧「近期活动」按任务创建时间倒序展示进行中和已结束的任务；超过 8 条可
-  展开。
+- 右侧「近期活动」按更新时间倒序展示进行中和已结束的任务；默认 6 条，点
+  「显示更多」展开。每条显示状态、项目和时间。
+- 点任务打开浮层详情卡：状态、项目、模型/思考强度、Worker 是否在线、Brief、
+  报告（倒序）、关联线程。卡片顶部 `‹` 返回列表，`✕` 关闭。
+- 任务有在线 Worker 时，详情卡提供「给 Worker 发指令」输入框，可直接纠正方向、
+  补充约束；发送后 Worker 的报告仍以 trigger 回到 Router。底部「打开聊天」跳到
+  完整 Worker 会话。
+- 顶部模型 chip 快速切换**默认 Worker 模型/强度**；旁边的 ⚙ 打开模型面板：
+  - allowlist：只允许 Router 从这里选择 Worker 模型；
+  - 每个模型可以限制 reasoning efforts，并指定默认 effort；
+  - 「跟随宿主全部模型」清空 allowlist；保存写到项目配置。
+- 「Rules」维护长期工作约定：全局或项目、追加或覆盖全局；可停用/编辑/删除。
+- 「Schedules」创建和取消定时唤醒：一次、每日、每周、Cron 或绝对时间；可
+  「立即执行」一次。上限由 `schedule.maxActive` 控制。
+- 「Reset」二次确认后中止当前 Worker、取消当前 Router 的定时任务（reminder 绑定
+  会话，旧会话隐藏后不应继续唤醒）、切换新的 dataDir generation、创建新 Router；
+  旧 Worker 归档，旧 Router 会话保留但隐藏。长期约定文件不随 Reset 丢失。
 - Worker Session 不出现在侧栏，`[super-agent]` 内部 trigger 不出现在聊天流。
-- 顶部「Reset」二次确认后中止当前 Worker、切换新的 dataDir generation、创建新
-  Router；旧 Worker 归档，旧 Router 会话保留但隐藏。
 
 默认 workspace：
 
@@ -30,6 +43,92 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 | Windows | `%LOCALAPPDATA%\dsh-super-agent\workspace` |
 
 可用 `DSH_SUPER_AGENT_HOME` 或 profile 配置 `superAgentHome` 覆盖。
+
+## Worker 模型与思考强度
+
+`models.allowed` 是 Router 唯一可选的 Worker 模型集合；为空时跟随宿主目录。
+每条可以写：
+
+```json
+{
+  "models": {
+    "allowed": [
+      {
+        "id": "flash",
+        "label": "DeepSeek-Flash",
+        "provider": "dsh-provider-qoder",
+        "model": "dfmodel",
+        "efforts": ["low", "high", "max"],
+        "defaultEffort": "high",
+        "note": "日常默认，快"
+      }
+    ],
+    "default": "flash",
+    "defaultEffort": "high"
+  }
+}
+```
+
+- `id` 是 Router/面板看到的短 id，缺省为 `provider/model`；
+- `efforts` 缺省表示该模型目录里的全部 effort 都允许；空数组表示不限制；
+- `defaultEffort` 缺省用目录默认；显式指定但不在允许列表会被拒绝；
+- 目录暂时不可用时，显式 allowlist 仍保留，标成 `available: false`，真正调用由
+  宿主报错；
+- Router 可以在 `superagent_dispatch` 里传 `model` / `reasoning_effort`；
+  `superagent_models` 返回当前可选模型和 efforts。
+
+只想暴露一个渠道的几个模型、又不想抄 model id 时，用来源过滤：
+
+```json
+{
+  "models": {
+    "onlyProvider": "dsh-provider-qoder",
+    "onlyNames": ["DeepSeek-Flash", "Qwen3.8-Flash", "GLM-5.3-Flash"],
+    "default": "",
+    "defaultEffort": ""
+  }
+}
+```
+
+`onlyNames` 同时匹配 model id 和显示名，顺序即默认模型优先级；`allowed` 非空
+时以显式 allowlist 为准。过滤后的目录也会限制面板，不会在 UI 里冒出其它渠道。
+
+## 长期工作约定
+
+约定保存在 `<项目根>/.dsh/super-agent.agreements.json`，不放在 generation 的
+dataDir 里，所以 Reset 不会丢。条目：
+
+```json
+{
+  "id": "agr_...",
+  "title": "先给结论",
+  "text": "回复先给结果，再给必要解释；不要贴 Worker 原文。",
+  "project": "",
+  "projectTitle": "",
+  "mode": "append",
+  "enabled": true
+}
+```
+
+- `project: ""` 是全局；绝对项目路径是项目级；
+- `append` 追加到全局规则；`replace` 在该项目里覆盖全局规则（其它项目规则保留）；
+- Router 和每个 Worker 的提示词都会注入启用中的约定；
+- 用户说「以后都这样」时，Router 用 `superagent_agreement` 保存；面板也可以维护；
+- 文件损坏时降级为 warning，不影响 Router 启动。
+
+## 定时任务
+
+使用宿主 `@deepseek-ai/dsh-schedule`（`ctx.schedule`），不是插件自己的计时器。
+到点后宿主向 Router 投递一条 reminder，Router 被唤醒并自行判断是否派活。支持：
+
+- `after_seconds`：N 秒后一次；
+- `at`：绝对时间（RFC3339）；
+- `daily` / `weekly` / `cron`：需要 IANA 时区；
+- `every_seconds`：固定间隔（≥60 秒）。
+
+每条必须有 `title`（≤120）和 `prompt`；插件会加
+`[super-agent scheduled task]` 框，避免模型把唤醒当成用户即时消息。默认最多
+`schedule.maxActive` 条活跃任务。面板可立即执行一次，不影响下一次时间。
 
 ## Worker 复用
 
@@ -81,6 +180,14 @@ node bin/super-agent.mjs config
 | POST | `/api/super-agent/ui/ensure` | 确保 Router；body 可省略，或传 `{"cwd":"/abs/project"}` |
 | POST | `/api/super-agent/ui/focus` | 兼容旧脚本的 focus 设置 |
 | POST | `/api/super-agent/ui/reset` | 中止 Worker、切换 generation、创建新 Router |
+| GET | `/api/super-agent/ui/activity?limit=N` | 近期活动（含已结束），`limit` 最大 50 |
+| GET | `/api/super-agent/ui/task?task_id=…` | 单个任务详情：Brief、报告、线程、Worker 是否在线 |
+| POST | `/api/super-agent/ui/task/steer` | 给在线 Worker 发一条指令，body `{task_id,text}` |
+| GET/POST | `/api/super-agent/ui/models` | 读/写 Worker 模型 allowlist 和默认选择 |
+| GET/POST | `/api/super-agent/ui/agreements` | 读/写长期工作约定 |
+| GET/POST | `/api/super-agent/ui/schedules` | 读/建定时唤醒 |
+| POST | `/api/super-agent/ui/schedules/run` | 立即执行一次某条定时任务 |
+| POST | `/api/super-agent/ui/schedules/cancel` | 取消某条定时任务 |
 
 ## 配置文件
 
@@ -132,6 +239,33 @@ node bin/super-agent.mjs config
     "repeatMs": 600000
   },
 
+  "models": {
+    "allowed": [],
+    "default": "",
+    "defaultEffort": "",
+    "onlyProvider": "",
+    "onlyNames": []
+  },
+
+  "agreements": {
+    "fileName": "super-agent.agreements.json",
+    "maxItems": 40,
+    "maxCharsPerItem": 2000,
+    "injectChars": 6000
+  },
+
+  "schedule": {
+    "maxActive": 20,
+    "timeZone": "",
+    "frame": true
+  },
+
+  "voice": {
+    "style": "brief",
+    "maxWords": 120,
+    "expandWhenAsked": true
+  },
+
   "channels": {
     "im":     { "maxWords": 100, "guidance": "One decision or result." },
     "github": { "maxWords": 600, "guidance": "Context, change, verification." },
@@ -152,6 +286,15 @@ node bin/super-agent.mjs config
   queued 任务自动补位。idle Worker 可供 steer/Thread 直通。
 - `channels.<name>.maxWords`：`superagent_tell` 硬上限；`0` 表示不限。
 - `redact`：进入 journal 前遮盖常见 key/token；不是安全边界。
+- `models.allowed`：Router 唯一可选的 Worker 模型；空数组时按 `onlyProvider` /
+  `onlyNames` 过滤，再空则跟随宿主全部目录。`default` 必须是 allowlist 里的
+  `id` 或 `provider/model`。
+- `models.defaultEffort`：默认思考强度；为空用模型自己的默认。
+- `agreements.fileName`：相对项目根 `.dsh/` 的文件名；一般不用改。
+- `schedule.maxActive`：活跃定时任务上限；`timeZone` 是未传时区时的默认 IANA
+  时区，空表示用宿主本地时区。
+- `voice.maxWords`：`superagent_tell` 的短回复上限；`expandWhenAsked` 允许用户
+  明确要求长答时放宽。
 
 配置坏了（JSON 语法、路径越界、字段类型）时插件保持关闭并记 warn，不会阻止
 普通会话创建。

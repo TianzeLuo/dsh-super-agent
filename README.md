@@ -12,6 +12,12 @@
 - **双层调度**：同项目任务用 subagent，跨项目任务在目标项目建普通 Session，
   保证 `workspace-write` 沙箱正确。
 - **可复用 Worker**：连续任务可沿用一个 Worker 的上下文，独立任务仍可并行。
+- **模型/思考强度可选**：只在用户允许的模型子集里选；面板可维护 allowlist 和默认 Worker 模型。
+- **近期活动可打开**：任务列表点开是小卡片详情，含报告、线程、模型和「给 Worker 发指令」；
+  也可以直接打开完整 Worker 会话。
+- **长期工作约定**：用户说「以后都这样」后，Router 把它写成全局或项目规则，注入自己
+  和每个 Worker；Reset 不会丢。
+- **定时唤醒**：用宿主 `ctx.schedule` 建一次/每日/每周/Cron 任务，到点唤醒 Router 再决定是否派活。
 - **事件驱动**：外部事件进入持久化 Trigger 队列，程序层过滤后合批给 Router。
 - **Thread 直通**：已归属 Worker 的讨论后续直接投递，不再经过 Router。
 - **可审计**：journal 只追加；活动栏只展示任务，不展示 Worker 内部会话。
@@ -28,8 +34,13 @@ Super-agent Workspace，不需要先选项目。
 ## 使用
 
 - 直接输入任务；Router 根据描述和 `superagent_projects` 选择目标项目。
-- 右侧「近期活动」按时间倒序显示进行中和已结束的任务；超过 8 条可展开。
-- 「Reset」二次确认后中止当前 Worker、切换新的数据目录 generation、创建新 Router。
+- 右侧「近期活动」按更新时间倒序显示进行中和已结束的任务；默认 6 条，可展开。
+  点一条任务会打开浮层详情卡：状态、项目、模型/强度、Brief、报告、线程，以及
+  「给 Worker 发指令」；卡片底部可打开完整 Worker 会话。
+- 顶部模型 chip 快速切换默认 Worker 模型/强度；⚙ 打开模型 allowlist、默认模型和
+  每个模型的 effort 限制。
+- 「Rules」维护长期工作约定；「Schedules」管理定时唤醒。
+- 「Reset」二次确认后中止当前 Worker、取消绑定当前 Router 的定时任务、切换新的数据目录 generation、创建新 Router。
 - Worker 会话和内部 `[super-agent]` trigger 不出现在侧栏/聊天流。
 
 ### Worker 复用
@@ -62,6 +73,26 @@ Router 可在 `superagent_dispatch` 里传 `reuse_task_id`，让新任务复用�
 
 可用 `DSH_SUPER_AGENT_HOME` 或 profile 的 `superAgentHome` 覆盖。完整配置、CLI、
 HTTP 端点和频道桥见 [docs/usage.md](docs/usage.md)。
+
+### 只允许一个来源的模型
+
+如果宿主同时配置了多个渠道，但只想让 Worker 用其中一家的几个模型，可以同时设置
+`onlyProvider` 和 `onlyNames`，不用把每个 model id 抄一遍：
+
+```json
+{
+  "models": {
+    "onlyProvider": "dsh-provider-qoder",
+    "onlyNames": ["DeepSeek-Flash", "Qwen3.8-Flash", "GLM-5.3-Flash"],
+    "default": "",
+    "defaultEffort": ""
+  }
+}
+```
+
+`onlyNames` 的顺序也是默认模型优先级；名字匹配 model id / 显示名，大小写不敏感。
+`allowed` 非空时以显式 allowlist 为准，`onlyProvider` / `onlyNames` 只影响空
+allowlist 时的可见目录。
 
 ## 文档
 

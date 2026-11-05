@@ -197,6 +197,78 @@ export function fakeSessionWorkers(children) {
   }
 }
 
+/** 假模型目录/选择桥；记录每次为普通 Session 选择模型。 */
+export function fakeModels(catalog = { groups: [], failures: [] }, defaultSelection = undefined) {
+  const selections = []
+  return {
+    selections,
+    calls: 0,
+    async catalog() {
+      this.calls += 1
+      return catalog
+    },
+    defaultSelection() {
+      return defaultSelection
+    },
+    async selectSession(sessionId, selection) {
+      selections.push({ sessionId, selection })
+    },
+  }
+}
+
+/** 假宿主 schedule 服务；只实现 runtime 用到的 create/list/delete。 */
+export function fakeSchedule() {
+  const records = new Map()
+  let next = 0
+  return {
+    records,
+    async list(sessionId) {
+      return [...records.values()].filter((record) => record.sessionId === sessionId)
+    },
+    async create(sessionId, request) {
+      next += 1
+      const id = `sched_test_${next}`
+      const record = {
+        id,
+        sessionId,
+        title: request.title,
+        prompt: request.prompt,
+        kind: request.after_seconds !== undefined
+          ? 'after'
+          : request.every_seconds !== undefined
+            ? 'every'
+            : request.daily !== undefined
+              ? 'daily'
+              : request.weekly !== undefined
+                ? 'weekly'
+                : request.cron !== undefined
+                  ? 'cron'
+                  : 'at',
+        ...(request.after_seconds !== undefined ? { afterSeconds: request.after_seconds } : {}),
+        ...(request.every_seconds !== undefined ? { everySeconds: request.every_seconds } : {}),
+        ...(request.at !== undefined ? { scheduledAt: new Date(Date.now() + 60_000).toISOString() } : {}),
+        ...(request.daily !== undefined ? { time: request.daily.time, timeZone: request.daily.time_zone } : {}),
+        ...(request.weekly !== undefined ? { time: request.weekly.time, timeZone: request.weekly.time_zone, weekdays: request.weekly.weekdays } : {}),
+        ...(request.cron !== undefined ? { expression: request.cron.expression, timeZone: request.cron.time_zone } : {}),
+        ...(request.after_seconds !== undefined ? { scheduledAt: new Date(Date.now() + request.after_seconds * 1000).toISOString() } : {}),
+        ...(request.every_seconds !== undefined ? { scheduledAt: new Date(Date.now() + request.every_seconds * 1000).toISOString() } : {}),
+        state: 'scheduled',
+      }
+      records.set(id, record)
+      return record
+    },
+    async cancel(sessionId, id) {
+      const record = records.get(id)
+      if (record === undefined || record.sessionId !== sessionId) return { id, deleted: false, code: 'schedule_not_found' }
+      records.delete(id)
+      return { id, deleted: true }
+    },
+    async delete({ sessionId, id }) {
+      return this.cancel(sessionId, id)
+    },
+  }
+}
+
 /** 造一个带 .git 与数据目录的项目。 */
 export function fakeProject() {
   const root = mkdtempSync(join(tmpdir(), 'dsh-super-agent-runtime-'))
@@ -222,6 +294,8 @@ export function setupRuntime(options = {}) {
   const projects = options.projects ?? (() => [])
   const timers = options.timers ?? fakeTimers()
   const config = mergeConfig(DEFAULTS, options.config ?? {})
+  const models = options.models ?? fakeModels()
+  const schedule = options.schedule ?? fakeSchedule()
   const runtime = new SuperAgentRuntime({
     agent: router,
     store,
@@ -231,12 +305,15 @@ export function setupRuntime(options = {}) {
     subagents,
     sessionWorkers,
     projects,
+    models,
+    schedule,
+    agreementsPath: options.agreementsPath ?? join(project.root, '.dsh', 'super-agent.agreements.json'),
     getAgent: (id) => children.get(id),
     logger: { warn: () => undefined, info: () => undefined },
     timers,
   })
   runtime.start()
-  return { ...project, store, children, router, subagents, sessionWorkers, timers, config, runtime }
+  return { ...project, store, children, router, subagents, sessionWorkers, timers, config, runtime, models, schedule }
 }
 
 /** 让 microtask 链（startActivation → attachWorker）跑完。 */

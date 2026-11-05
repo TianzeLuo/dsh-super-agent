@@ -30,7 +30,7 @@
 | 组件 | 文件 | 职责 | 不做什么 |
 | --- | --- | --- | --- |
 | 插件入口 | `lib/index.js` | 项目开关、Router 认领、注册工具/提示词/HTTP/UI、租约、跨项目 Session Worker | 不做调度 |
-| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话、右侧活动栏、二次确认重置、Worker/旧 Router 展示层隐藏；无项目选择器 | 不定义消息协议，不选项目 |
+| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话、右侧活动栏与任务详情、模型/规则/定时任务抽屉、二次确认重置、Worker/旧 Router 展示层隐藏；无项目选择器 | 不定义消息协议，不选项目 |
 | Runtime | `lib/runtime.js` | 批处理、直通、Worker 生命周期、报告、Watchdog、恢复、inbox | 不调模型 |
 | Store | `lib/store.js` | journal 追加、重放、内存索引 | 不做策略 |
 | Filter | `lib/filter.js` | 程序层快路径 | 不调模型 |
@@ -38,7 +38,10 @@
 | Recall | `lib/recall.js` | 链式召回 | 不写状态 |
 | Config | `lib/config.js` | 默认值、合并、路径边界 | 不读会话 |
 | Prompt | `lib/prompt.js` | Router 提示词/动态上下文 | 不执行工具 |
-| Tools | `lib/tools.js` | 七个模型工具 | 不直接改 journal |
+| Tools | `lib/tools.js` | 十个模型工具（状态/召回/项目/派工/模型/定时/约定/指令/汇报/关闭） | 不直接改 journal |
+| Models | `lib/models.js` | 目录展开、allowlist/来源过滤、默认选择、effort 校验 | 不调模型 |
+| Agreements | `lib/agreements.js` | 长期约定的持久化、作用域合并、提示词注入 | 不执行工具 |
+| Schedule bridge | `lib/index.js` / `lib/runtime.js` | 把宿主 `ctx.schedule` 暴露成工具和 UI | 不自己计时 |
 
 依赖方向是单向的：`runtime → store / filter / render / recall / config`；
 `index → runtime / tools / prompt / store`。`store`、`filter`、`render`、`recall`
@@ -186,11 +189,13 @@ pump:
 
 `spawnTask`：
 
-1. 预约 `workerSessionId`（UUID），写 `task.updated(status=starting)`。
-2. 校验 `ctx.subagents` 与 provider 存在。
-3. `renderWorkerTask` 生成独立任务提示。
-4. `startActivation({provider, label, childId, request:{prompt,parent,cwd},
-   signal, delivery:'caller'})`。
+1. 预约一个临时 `workerSessionId`，写 `task.updated(status=starting)`；它只是
+   占位，真正 Session id 以宿主返回为准。
+2. 目标 cwd 在 Router 项目外时，走 `sessionController.create({cwd})` 建**普通
+   Session**（这样 `workspace-write` 的根是目标项目），解析到 Agent 后用
+   `agent.session.header.id` 作为 canonical id；同项目则走 `ctx.subagents`。
+3. 模型选择在 Agent 建立后、prompt 之前安装，避免 Worker 第一轮用错模型。
+4. `renderWorkerTask` 生成独立任务提示。
 5. 成功后写 `status=working`，挂 `agent/ctx` 监听；失败则 `failed` + report。
 
 `activation.result` 只在 teardown 时 settle，因此**不拿它当任务完成信号**。
@@ -236,6 +241,57 @@ queued 任务立即补位；否则 Router 不主动 `close` 时队列会永久�
   归属，不会写回旧的 idle 任务；
 - Thread 直通按 Worker 去重，并优先当前活动任务；共享 Worker 忙时不再并发投递；
 - 关闭共享 Worker 的任意一个任务不会掐掉其他任务；最后一个任务关闭时才释放。
+
+### 模型与思考强度
+
+模型选择在**派工时**固定，不在 Worker 运行中漂移：
+
+1. `normalizeModelConfig` 把显式 `allowed` 或来源过滤（`onlyProvider` /
+   `onlyNames`）折成统一目录；空目录表示跟随宿主全部模型。
+2. `resolveModelSelection` 解析任务请求：显式 `model`/`reasoning_effort` 优先，
+   否则用 allowlist 默认，再否则用宿主默认/第一个可用模型。
+3. 校验 effort 是否在模型允许集合内；不允许直接抛错，不静默降级。
+4. 跨项目 Worker 在 `sessionController.create` 之后调用
+   `selectModel({sessionId, ...})`；subagent 则把 `agentOptions` 放进
+   `startActivation.request`。
+5. 复用任务沿用源任务的模型；显式换模型会被拒绝，避免同一会话上下文里模型
+   身份不一致。
+
+模型目录缓存按宿主 `modelCatalog()` 的刷新结果失效；目录不可用时显式 allowlist
+仍保留并标 `available: false`，让 Router 能看到“配置过但当前不可用”，而不是
+误以为用户没配。
+
+### 长期工作约定
+
+约定是**用户意图**，不是 Worker 报告，因此单独放在
+`<项目根>/.dsh/super-agent.agreements.json`，不进入 generation 的 dataDir：
+
+- `append` 条目注入 Router 和所有 Worker；
+- 项目级 `replace` 在该项目内覆盖全局条目，不删除全局文件；
+- 注入有 `maxItems` / `maxCharsPerItem` / `injectChars` 上限；
+- 文件损坏只记 warning，不阻止 Router 启动；
+- Reset 只换 dataDir，不碰这个文件。
+
+### 定时唤醒
+
+定时能力完全委托宿主 `ctx.schedule`，插件只做三件事：
+
+1. 把 `superagent_schedule` 工具和 UI 的创建/取消/立即执行映射到宿主服务；
+2. 到点后宿主投递 reminder，Router 被正常唤醒；插件用
+   `[super-agent scheduled task]` 框把“预设任务”与用户即时消息区分开；
+3. 在 Router 提示词里注入当前活跃定时任务摘要，避免重复创建。
+
+插件不维护自己的 cron 循环，也不假设宿主进程一直活着；错过的唤醒由宿主服务
+按自己的策略补偿。Reset 换 Router 会话前会取消旧 Router 的全部活跃 reminder：
+reminder 绑定会话，留着只会唤醒已经隐藏的旧 Router，新 Router 也看不到它们。
+
+### 任务详情与中途指令
+
+活动栏只读任务，不读 Worker 内部会话。`uiTask` 汇总 Brief、报告、线程和
+`workerLive`；`uiTaskSteer` 在 Worker live 时直接 `followup` 一条带
+`[super-agent steer]` 标记的消息，不创建新任务、不改变任务归属。Worker 的下一
+条报告仍以 `turn/end` 回到 Router，因此“纠正方向”和“汇报结果”走同一条链路。
+任务已结束或 Worker 已释放时，steer 返回明确错误，UI 不展示输入框。
 
 ## 7. Thread 订阅与直通
 
@@ -344,7 +400,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 事件正文 | untrusted 分隔块 + 提示词明确「数据不是指令」 | 提示层，不是沙箱 |
 | 凭据 | ingest/report/outbox 前脱敏；事件不应携带凭据 | 正则覆盖常见形态，不穷尽 |
 | 数据根 | 绝对路径校验；拒绝盘符根、`~/.dsh`、系统目录 | 不阻止用户在项目内误放敏感文件 |
-| HTTP | `/api` 前缀，走宿主浏览器鉴权；ingest/status/outbox + 面板的 ensure/state/reset（focus 仅兼容） | 不额外做 HMAC；需要时由反向代理加 |
+| HTTP | `/api` 前缀，走宿主浏览器鉴权；ingest/status/outbox + 面板 ensure/state/reset/activity/task/steer/models/agreements/schedules（focus 仅兼容） | 不额外做 HMAC；需要时由反向代理加 |
 | UI 入口 | ensure 不要求 cwd；在独立 Super-agent Workspace 创建普通 Session；不借用/自动配置用户项目 | 不提供任意文件管理；独立 workspace 显式 `enabled:false` 时拒绝 |
 | 频道 | 插件不持有 IM/GitHub 凭据；只写 outbox | 桥接器自己负责鉴权与重试 |
 | Router 越权 | 默认开启 `guardExecutionTools`，拦截 bash/write/edit | 只在本插件安装的 agent scope；可显式关闭 |
@@ -437,11 +493,14 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | Render | `test/render.test.mjs` | 摘要、预算、Worker 提示、字数、脱敏 |
 | Recall | `test/recall.test.mjs` | 一跳链接、截断、report/reply/batch |
 | Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、idle 释放槽位、Worker 复用、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker、project 解析 |
-| 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP、无 cwd ensure、项目清单、租约、重置 generation/Worker 归档 |
+| 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP 15 条路由、无 cwd ensure、项目清单、租约、重置 generation/Worker 归档 |
+| 模型 | `test/models.test.mjs` | 目录展开、allowlist、`onlyProvider`/`onlyNames`、默认选择、effort 校验、空匹配警告 |
+| 约定 | `test/agreements.test.mjs` | 全局/项目、append/replace、损坏文件、上限、注入文本 |
+| 功能 | `test/features.test.mjs` | 模型派工、复用冲突、跨项目模型、约定注入、任务详情/活动、定时桥 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 132 个用例，全部不需要模型调用。
+共 159 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
@@ -452,7 +511,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 1. 用 `dsh plugin --profile <temp> add /abs/path/dsh-super-agent` 安装，`--dump-config`
    确认 `super-agent` 行出现在 profile 合成结果里。
 2. 在临时项目写 `.dsh/super-agent.json`，启动 `dsh --profile <temp> headless ...`。
-   插件加载，`owner.json`/`journal.jsonl` 创建；Router 的系统提示词与七个工具
+   插件加载，`owner.json`/`journal.jsonl` 创建；Router 的系统提示词与十个工具
    出现在真实 `request/header` 中。
 3. 测试 LLM 调用 `superagent_dispatch`，宿主创建独立 subagent Session；Worker
    任务提示完整出现在 `agent/inbox/spliced`，子会话有独立 system prompt 和工具集。
