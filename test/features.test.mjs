@@ -158,6 +158,26 @@ test('activity keeps closed tasks for history', async () => {
   assert.equal(ctx.runtime.activity(10, { includeClosed: false }).length, 0)
 })
 
+test('closing a cross-project task keeps its session openable in activity', async () => {
+  const other = fakeProject()
+  const ctx = setupRuntime({
+    config: modelConfig,
+    models: fakeModels(catalog),
+    projects: () => [{ title: 'other', path: other.root }],
+  })
+  await tick()
+  const result = await ctx.runtime.dispatch({ title: 'Keep history', brief: 'Do it.', project: 'other' })
+  const workerId = ctx.sessionWorkers.calls[0].childId
+  await ctx.runtime.close({ taskId: result.taskId })
+  await tick()
+  assert.equal(ctx.sessionWorkers.archives.length, 0, 'close must not archive the worker session')
+  const detail = ctx.runtime.taskDetail(result.taskId)
+  assert.equal(detail.status, 'closed')
+  assert.equal(detail.workerSessionId, workerId)
+  assert.equal(detail.workerLive, false)
+  assert.equal(ctx.runtime.activity(10)[0].workerSessionId, workerId)
+})
+
 test('scheduled tasks create, list, cancel and run immediately', async () => {
   const ctx = setupRuntime({ config: modelConfig, models: fakeModels(catalog) })
   await tick()

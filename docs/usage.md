@@ -18,10 +18,13 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 - 右侧「近期活动」按更新时间倒序展示进行中和已结束的任务；默认 6 条，点
   「显示更多」展开。每条显示状态、项目和时间。
 - 点任务打开浮层详情卡：状态、项目、模型/思考强度、Worker 是否在线、Brief、
-  报告（倒序）、关联线程。卡片顶部 `‹` 返回列表，`✕` 关闭。
+  报告（倒序）、关联线程。卡片顶部 `‹` 返回列表，`✕` 关闭；宽屏下浮在对话右侧，
+  不挤压主对话。
 - 任务有在线 Worker 时，详情卡提供「给 Worker 发指令」输入框，可直接纠正方向、
-  补充约束；发送后 Worker 的报告仍以 trigger 回到 Router。底部「打开聊天」跳到
-  完整 Worker 会话。
+  补充约束；发送后 Worker 的报告仍以 trigger 回到 Router。底部固定「打开聊天」
+  跳到完整 Worker 会话；关闭任务只释放 Agent、不归档会话，所以历史任务也能回看。
+- 「在会话中打开」把当前 Router 作为普通 DSH 会话打开；如果宿主尚未注入
+  `uiWorkspace`，面板会提示重试，而不是静默无反应。
 - 顶部模型 chip 快速切换**默认 Worker 模型/强度**；旁边的 ⚙ 打开模型面板：
   - allowlist：只允许 Router 从这里选择 Worker 模型；
   - 每个模型可以限制 reasoning efforts，并指定默认 effort；
@@ -179,7 +182,7 @@ node bin/super-agent.mjs config
 | GET | `/api/super-agent/ui/state` | 面板状态、项目、任务、workspace sessions |
 | POST | `/api/super-agent/ui/ensure` | 确保 Router；body 可省略，或传 `{"cwd":"/abs/project"}` |
 | POST | `/api/super-agent/ui/focus` | 兼容旧脚本的 focus 设置 |
-| POST | `/api/super-agent/ui/reset` | 中止 Worker、切换 generation、创建新 Router |
+| POST | `/api/super-agent/ui/reset` | 中止并归档 Worker、取消定时任务、切换 generation、创建新 Router |
 | GET | `/api/super-agent/ui/activity?limit=N` | 近期活动（含已结束），`limit` 最大 50 |
 | GET | `/api/super-agent/ui/task?task_id=…` | 单个任务详情：Brief、报告、线程、Worker 是否在线 |
 | POST | `/api/super-agent/ui/task/steer` | 给在线 Worker 发一条指令，body `{task_id,text}` |

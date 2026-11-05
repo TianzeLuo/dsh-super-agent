@@ -93,6 +93,10 @@
     插件卸载/热重载时自动注销；`awayNotifyPanels` 缺席、没有 `register`、调用抛错一律
     **静默降级**，面板照常打开，最坏退回自动学习。`PANEL_ID` 与 `PANEL_SOURCE` 是
     「槽注册 / retain / 登记」三处共用的常量，改名只需改一处。
+15. **内部 Worker 行不随面板卸载而泄露**：只把隐藏 CSS 放在面板里不够——打开 Worker
+    聊天会卸载面板，侧栏立刻恢复显示。浏览器半部在 `document.head` 放一份持久 style，
+    并按 `Super-agent worker ·` 标题前缀给旧 generation 的行打标记；隐藏规则和观察器
+    挂在 `apply` 上，不在组件卸载时移除。
 
 ## 4. 事件 intake 算法
 
@@ -226,7 +230,8 @@ Worker 是 `subagent-spawn` 起的独立 Agent，工具集由它自己的 preset
 `maxWorkers` 统计「starting 或 working」的任务；idle Worker 可以继续驻留，
 供 steer/Thread 直通，但不占执行槽位。Worker 报告完成后 runtime 调用 `pump`，
 queued 任务立即补位；否则 Router 不主动 `close` 时队列会永久停住（真实 5 任务
-测试发现的问题）。`close` 仍会释放驻留会话。
+测试发现的问题）。`close` 只 dispose 运行中的 Agent、保留 durable Session：活动
+详情的「打开聊天」要能回看历史；只有 Reset 才归档旧 Worker。
 
 ### Worker 复用
 
@@ -500,7 +505,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 159 个用例，全部不需要模型调用。
+共 160 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录

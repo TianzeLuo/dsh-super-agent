@@ -36,11 +36,13 @@ Super-agent Workspace，不需要先选项目。
 - 直接输入任务；Router 根据描述和 `superagent_projects` 选择目标项目。
 - 右侧「近期活动」按更新时间倒序显示进行中和已结束的任务；默认 6 条，可展开。
   点一条任务会打开浮层详情卡：状态、项目、模型/强度、Brief、报告、线程，以及
-  「给 Worker 发指令」；卡片底部可打开完整 Worker 会话。
+  「给 Worker 发指令」；卡片底部固定「打开聊天」，可直接回到完整 Worker 会话。
+  关闭任务只释放运行中的 Agent，会话仍保留，所以历史任务也能回看。
 - 顶部模型 chip 快速切换默认 Worker 模型/强度；⚙ 打开模型 allowlist、默认模型和
   每个模型的 effort 限制。
 - 「Rules」维护长期工作约定；「Schedules」管理定时唤醒。
-- 「Reset」二次确认后中止当前 Worker、取消绑定当前 Router 的定时任务、切换新的数据目录 generation、创建新 Router。
+- 「Reset」二次确认后中止当前 Worker、归档旧 Worker 会话、取消绑定当前 Router 的定时任务、
+  切换新的数据目录 generation、创建新 Router。
 - Worker 会话和内部 `[super-agent]` trigger 不出现在侧栏/聊天流。
 
 ### Worker 复用

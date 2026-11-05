@@ -168,8 +168,13 @@ export function fakeSubagents(children) {
 /** 假跨项目 Session Worker 服务。 */
 export function fakeSessionWorkers(children) {
   const calls = []
+  const archives = []
   return {
     calls,
+    archives,
+    async archive(sessionId) {
+      archives.push(sessionId)
+    },
     create(spec) {
       const id = spec.sessionId ?? `session-worker-${calls.length + 1}`
       const child = fakeChild(id)
