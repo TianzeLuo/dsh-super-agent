@@ -66,6 +66,8 @@ test('empty allowlist exposes the whole catalog and falls back to the host defau
   const view = normalizeModelConfig({ models: { allowed: [] } }, { catalog })
   assert.equal(view.mode, 'all')
   assert.equal(view.models.length, 3)
+  assert.equal(view.catalogTotal, 3)
+  assert.equal(modelViewPayload(view).catalogTotal, 3)
   assert.equal(view.defaultId, 'qoder/dfmodel')
   assert.ok(modelSummary(view).includes('default qoder/dfmodel'))
   assert.ok(modelViewPayload(view).models.every((entry) => entry.configured === false))
@@ -142,6 +144,23 @@ test('onlyProvider and onlyNames keep the router inside one source without an ex
   assert.ok(view.warnings.every((warning) => !warning.includes('没有匹配')))
   const selection = resolveModelSelection({ model: 'Qwen3.8-Flash' }, view)
   assert.equal(selection.selection.model, 'qfmodel')
+})
+
+test('clearing onlyProvider/onlyNames exposes the full host catalog', () => {
+  const filtered = normalizeModelConfig({
+    models: { allowed: [], onlyProvider: 'qoder', onlyNames: ['DeepSeek-V4-Pro'] },
+  }, { catalog })
+  assert.equal(filtered.mode, 'filtered')
+  assert.equal(filtered.models.length, 1)
+  assert.equal(filtered.catalogTotal, 3)
+
+  const cleared = normalizeModelConfig({
+    models: { allowed: [], onlyProvider: '', onlyNames: [] },
+  }, { catalog })
+  assert.equal(cleared.mode, 'all')
+  assert.equal(cleared.filtered, false)
+  assert.equal(cleared.models.length, 3)
+  assert.equal(cleared.catalogTotal, 3)
 })
 
 test('onlyNames tolerates vendor version insertions and hyphen differences', () => {

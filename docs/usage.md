@@ -52,7 +52,8 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 ## Worker 模型与思考强度
 
 `models.allowed` 是 Router 唯一可选的 Worker 模型集合；为空时跟随宿主目录。
-每条可以写：
+默认就是“宿主目录全部模型”（当前这台机器是 11 个：Qoder、DeepSeek、DeepSeek Account、
+commandcode）。每条可以写：
 
 ```json
 {
@@ -82,7 +83,7 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 - Router 可以在 `superagent_dispatch` 里传 `model` / `reasoning_effort`；
   `superagent_models` 返回当前可选模型和 efforts。
 
-只想暴露一个渠道的几个模型、又不想抄 model id 时，用来源过滤：
+只想暴露一个渠道的几个模型、又不想抄 model id 时，用可选的来源过滤：
 
 ```json
 {
@@ -96,7 +97,9 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 ```
 
 `onlyNames` 同时匹配 model id 和显示名，顺序即默认模型优先级；`allowed` 非空
-时以显式 allowlist 为准。过滤后的目录也会限制面板，不会在 UI 里冒出其它渠道。
+时以显式 allowlist 为准。过滤后的目录也会限制面板，不会在 UI 里冒出其它渠道；
+此时面板会显示“当前只显示 N 个 / DSH 共 M 个”，并给出一键
+「使用 DSH 全部模型」（清空 `allowed`、`onlyProvider`、`onlyNames`，默认模型保持不变）。
 
 ## 长期工作约定
 
@@ -292,8 +295,8 @@ node bin/super-agent.mjs config
 - `channels.<name>.maxWords`：`superagent_tell` 硬上限；`0` 表示不限。
 - `redact`：进入 journal 前遮盖常见 key/token；不是安全边界。
 - `models.allowed`：Router 唯一可选的 Worker 模型；空数组时按 `onlyProvider` /
-  `onlyNames` 过滤，再空则跟随宿主全部目录。`default` 必须是 allowlist 里的
-  `id` 或 `provider/model`。
+  `onlyNames` 过滤，再空则跟随宿主全部目录。面板会显示过滤原因和
+  “DSH 共 N 个”的总数。`default` 必须是 allowlist 里的 `id` 或 `provider/model`。
 - `models.defaultEffort`：默认思考强度；为空用模型自己的默认。
 - `agreements.fileName`：相对项目根 `.dsh/` 的文件名；一般不用改。
 - `schedule.maxActive`：活跃定时任务上限；`timeZone` 是未传时区时的默认 IANA

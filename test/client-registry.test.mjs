@@ -235,4 +235,6 @@ test('任务详情占满右侧栏，Worker 模型只在抽屉里设置', () => {
   assert.match(source, /function SelectMenu/)
   assert.doesNotMatch(source, /type: 'checkbox'/, 'model allowlist uses a themed checkbox, not the native control')
   assert.match(source, /role: 'checkbox'/)
+  assert.match(source, /modelsFilterTitle/)
+  assert.match(source, /onlyProvider: '', onlyNames: \[\]/)
 })

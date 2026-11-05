@@ -101,6 +101,8 @@
     不再向对话区扩展，因此不会与底部 composer 重叠；设置抽屉仍可覆盖对话区。
 17. **默认 Worker 模型只在抽屉里设置**：顶栏只保留一个「Worker 模型」入口，
     抽屉内逐项勾选模型、设置默认模型和 effort；不再维护第二套 header 快捷选择器。
+    来源过滤是可选的；激活时抽屉必须同时显示「当前 N / DSH 共 M」和一键清空
+    `onlyProvider`/`onlyNames` 的入口，避免用户误以为宿主只有 N 个模型。
 18. **下拉菜单自绘，不依赖原生弹层**：原生 `select` 的弹出菜单在深色下仍可能白底，
     且无法完全跟随 DSH token；模型、effort、规则作用域、定时类型和星期都走
     `SelectMenu`（按钮 + `position: fixed` 菜单 + `aria-haspopup/listbox`），
@@ -517,7 +519,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 162 个用例，全部不需要模型调用。
+共 163 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
