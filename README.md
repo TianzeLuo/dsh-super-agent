@@ -60,6 +60,11 @@ dataDir、模型/规则/定时任务和未读计数；切换实例不会串数�
 - 「Reset」二次确认后中止当前 Worker、归档旧 Worker 会话、取消绑定当前 Router 的定时任务、
   切换新的数据目录 generation、创建新 Router。
 - Worker 会话和内部 `[super-agent]` trigger 不出现在侧栏/聊天流。
+- 会话里的文件链接（工具行的路径、`@file`、交付卡片）在面板内打开预览抽屉，按行显示、
+  可定位到被点的那一行。原因：面板是全局 `main` 面板，右侧栏此时没有「屏上会话」，
+  官方 `openResource` 会报 `sidebarRight: no session surface is mounted`；插件改为
+  用公开的 `remote.workspaceFiles` 读一页并在面板里渲染。普通会话里的文件链接仍然
+  走官方右侧栏，行为不变。
 
 ### Worker 复用
 
