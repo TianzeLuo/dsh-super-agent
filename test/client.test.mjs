@@ -43,9 +43,22 @@ test('client registers the sidebar entry, main panel and session-scoped child', 
 test('client has no project picker or focus endpoint', () => {
   assert.doesNotMatch(client, /FOCUS_KEY|ROUTES\.focus|sa-project-label/)
   assert.doesNotMatch(client, /<select|target project|目标项目/i)
-  assert.match(client, /postJson\(ROUTES\.ensure, \{\}\)/)
+  assert.match(client, /postJson\(ROUTES\.ensure, targetId\.length > 0/)
+  assert.match(client, /ROUTES\.instanceActive/)
+  assert.match(client, /InstanceSwitcher/)
+  assert.match(client, /publishUnread/)
+  assert.match(client, /data-super-agent-nav-badge/)
+  assert.match(client, /rgba\(79,124,255,\.72\)/)
+  assert.match(client, /\/ui\/instances\/active/)
+  assert.match(client, /instanceRename/)
   assert.doesNotMatch(client, /projectsAuto|welcomeBody|welcomeHint|disclaimer|activityHint|subtitle/)
   assert.doesNotMatch(client, /phase:\s*'hero'|hero:\s*true|useSessionBlank/)
+  assert.match(client, /GLYPHS/)
+  assert.match(client, /sa-activity-row/)
+  assert.match(client, /sa-icon-button/)
+  assert.match(client, /--dsw-alias-interactive-bg-hover/)
+  assert.match(client, /sa-header-action/)
+  assert.doesNotMatch(client, /▾|✕|‹|＋|✓/)
 })
 
 test('client shows the live activity rail and hides Worker sessions', () => {

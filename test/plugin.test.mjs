@@ -102,8 +102,8 @@ function fakeCordis() {
         entry.callback(scoped)
       }
     },
-    emit(event, payload) {
-      for (const handler of [...(handlers.get(event) ?? [])]) handler(payload)
+    emit(event, ...payload) {
+      for (const handler of [...(handlers.get(event) ?? [])]) handler(...payload)
     },
   }
 }
@@ -210,6 +210,9 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
     '/api/super-agent/ui/agreements',
     '/api/super-agent/ui/ensure',
     '/api/super-agent/ui/focus',
+    '/api/super-agent/ui/instances',
+    '/api/super-agent/ui/instances/active',
+    '/api/super-agent/ui/instances/rename',
     '/api/super-agent/ui/models',
     '/api/super-agent/ui/reset',
     '/api/super-agent/ui/schedules',
@@ -313,7 +316,7 @@ test('an uninitialized project stays inert', async () => {
   assert.equal(agent.tools.size, 0)
   assert.equal(agent.sections.length, 0)
   // UI 入口必须先于 Router 存在；工具/提示词仍然完全不注册。
-  assert.equal(sys.routes.size, 15)
+  assert.equal(sys.routes.size, 18)
 })
 
 test('UI ensure creates a Router through the generic Session API and focus updates it', async () => {
@@ -453,6 +456,118 @@ test('UI ensure without cwd uses an independent Super-agent workspace', async ()
   assert.deepEqual(stateBody.projects.map((project) => project.title), ['alpha'])
   assert.deepEqual(stateBody.workspaceSessions, [body.sessionId])
   sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
+})
+
+test('multiple instances share one anchor workspace while keeping homes and unread isolated', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-home-multi-'))
+  const sys = fakeCordis()
+  const created = []
+  const attached = []
+  sys.scoped.workspaceRegistry = {
+    list: () => created,
+    create(path, title) {
+      const workspace = {
+        id: `ws-${created.length + 1}`,
+        title,
+        path,
+        sessionIds: [],
+        attachSession: async (sessionId) => {
+          attached.push(sessionId)
+          workspace.sessionIds.unshift(sessionId)
+        },
+      }
+      created.push(workspace)
+      return workspace
+    },
+  }
+  sys.scoped.sessionController = {
+    async create({ cwd, sessionId }) {
+      const canonical = sessionId ?? `session-${Math.random().toString(16).slice(2)}`
+      const agent = fakeAgent({ id: canonical, cwd })
+      sys.agents.set(canonical, agent)
+      sys.emit('agent/created', { agent })
+      return { sessionId: canonical }
+    },
+    async resolveAgent(id) {
+      const agent = sys.agents.get(id)
+      return agent === undefined ? { error: { message: 'missing' } } : { agent }
+    },
+    async rename() {},
+  }
+  apply(sys.root, { superAgentHome: home })
+
+  const ensure = sys.routes.get('/api/super-agent/ui/ensure')
+  const first = await (await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: '{}',
+  }))).json()
+  assert.equal(first.instanceId, 'default')
+  assert.equal(first.projectRoot, home)
+
+  const create = await (await sys.routes.get('/api/super-agent/ui/instances').fetch(new Request('http://127.0.0.1/api/super-agent/ui/instances', {
+    method: 'POST',
+    body: JSON.stringify({ name: '写作' }),
+  }))).json()
+  assert.equal(create.ok, true)
+  assert.equal(create.instance.name, '写作')
+  assert.equal(create.instances.length, 2)
+
+  const renamed = await (await sys.routes.get('/api/super-agent/ui/instances/rename').fetch(new Request('http://127.0.0.1/api/super-agent/ui/instances/rename', {
+    method: 'POST',
+    body: JSON.stringify({ instance_id: create.instance.id, name: '长文写作' }),
+  }))).json()
+  assert.equal(renamed.ok, true)
+  assert.equal(renamed.instances.find((row) => row.id === create.instance.id).name, '长文写作')
+
+  const second = await (await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: JSON.stringify({ instance_id: create.instance.id }),
+  }))).json()
+  assert.equal(second.instanceId, create.instance.id)
+  assert.equal(second.projectRoot, create.instance.home)
+  assert.notEqual(second.projectRoot, home)
+  // 一个锚点 workspace 只注册一次；新实例只建目录和 config，不建第二个 workspace。
+  assert.equal(created.length, 1)
+  assert.deepEqual([created[0].title, created[0].path], ['Super-agent Workspace', home])
+  assert.deepEqual(attached, [first.sessionId])
+  assert.ok(existsSync(join(create.instance.home, '.dsh-super-agent-workspace')))
+  assert.ok(existsSync(join(create.instance.home, '.dsh', 'super-agent.json')))
+
+  // 当前 UI 在“写作”，默认实例收到一条回复：只给默认实例加未读。
+  const turn = { id: first.sessionId }
+  sys.emit('session/event', turn, { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: '已经完成' }] } } })
+  sys.emit('session/event', turn, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  const state = await (await sys.routes.get('/api/super-agent/ui/state').fetch(new Request('http://127.0.0.1/api/super-agent/ui/state'))).json()
+  assert.equal(state.activeInstanceId, create.instance.id)
+  assert.equal(state.unreadTotal, 1)
+  assert.equal(state.instances.find((row) => row.id === 'default').unread, 1)
+  assert.equal(state.instances.find((row) => row.id === create.instance.id).unread, 0)
+  assert.equal(state.routerSessionIds.length, 2)
+
+  const read = await (await sys.routes.get('/api/super-agent/ui/instances/active').fetch(new Request('http://127.0.0.1/api/super-agent/ui/instances/active', {
+    method: 'POST',
+    body: JSON.stringify({ instance_id: 'default', panel: true, visible: true, read: true }),
+  }))).json()
+  assert.equal(read.ok, true)
+  assert.equal(read.unreadTotal, 0)
+
+  // 当前就在默认实例且可见：同一形状的回复不再增加未读。
+  sys.emit('session/event', turn, { type: 'assistant/message', data: { turn: 2, message: { content: [{ type: 'text', text: '当前可见' }] } } })
+  sys.emit('session/event', turn, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } })
+  const visible = await (await sys.routes.get('/api/super-agent/ui/state').fetch(new Request('http://127.0.0.1/api/super-agent/ui/state'))).json()
+  assert.equal(visible.unreadTotal, 0)
+
+  // 面板关闭后同一个实例的回复才计入未读。
+  await sys.routes.get('/api/super-agent/ui/instances/active').fetch(new Request('http://127.0.0.1/api/super-agent/ui/instances/active', {
+    method: 'POST',
+    body: JSON.stringify({ instance_id: 'default', panel: false, visible: false }),
+  }))
+  sys.emit('session/event', turn, { type: 'assistant/message', data: { turn: 3, message: { content: [{ type: 'text', text: '后台回复' }] } } })
+  sys.emit('session/event', turn, { type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } } })
+  const background = await (await sys.routes.get('/api/super-agent/ui/state').fetch(new Request('http://127.0.0.1/api/super-agent/ui/state'))).json()
+  assert.equal(background.unreadTotal, 1)
+  sys.emit('agent/disposed', { agent: sys.agents.get(first.sessionId) })
+  sys.emit('agent/disposed', { agent: sys.agents.get(second.sessionId) })
 })
 
 test('UI ensure starts without any user project', async () => {

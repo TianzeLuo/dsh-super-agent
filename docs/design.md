@@ -65,22 +65,29 @@
 7. **跨项目写入的沙箱正确性**：DSH subagent 的 `header.cwd` 固定为父会话，
    `request.cwd` 只改 working directory；因此跨项目 Worker 必须是目标项目的
    普通 Session，不能靠 subagent 的 cwd 参数硬闯 sandbox。
-8. **单 Router 的 UI 一致性**：`/ui/ensure` 只复用/创建一条 Router；没有 cwd
-   时固定使用独立的 Super-agent Workspace（默认平台应用数据目录），不借用用户
-   项目。UI 创建的 Router 指针带 `ui: true`，`maybeInstall` 对「指针里是另一条
-   UI Router」的普通新会话直接跳过，避免 DSH 启动时自动打开的空白会话在 ensure
-   之前抢占 Router。
-9. **独立 workspace 不进入项目清单**：独立 workspace 根有
+8. **多实例的 UI 一致性**：`/ui/ensure` 按实例复用/创建 Router；没有 cwd 时使用
+   该实例的独立 home（默认实例就是锚点根，新实例在 `instances/<id>`）。所有实例
+   共用一个 DSH workspace 入口，新实例不调用 `workspaceRegistry.create`；每个实例
+   有独立名称、config、dataDir、模型/规则/定时任务和 Router 指针。UI 创建的
+   Router 指针带 `ui: true`，`maybeInstall` 对「指针里是另一条 UI Router」的普通
+   新会话直接跳过，避免 DSH 启动时自动打开的空白会话在 ensure 之前抢占 Router。
+9. **单锚点 workspace 与未读**：锚点根有唯一的 `.dsh-super-agent-workspace`
+   注册；实例只增加带同样标记的子目录，不会产生第二个侧栏 workspace 条目。
+   Router 的 `assistant/message` 只标记“本回合有可见回复”，`turn/end` 时若 UI
+   不在该实例、页面不可见或面板未打开，才给该实例的持久化 `unread` +1；进入实例
+   通过 `/ui/instances/active`（`read:true`）清零。左栏气泡轮询 `/ui/state`，
+   面板轮询同一状态，因此不依赖面板挂载。
+10. **独立 workspace 不进入项目清单**：独立 workspace 根有
    `.dsh-super-agent-workspace` 边界标记；`findProjectRoot` 把它当项目根，
    `superagent_projects` 排除它，用户不会把它当成可派工的项目。Router 在它里面
    运行，所有用户项目相对它都是“项目外”，任务使用目标项目的普通 Session。
-10. **项目由 Router 选，不由 UI 选**：`superagent_projects` 暴露宿主 workspace 清单；
+11. **项目由 Router 选，不由 UI 选**：`superagent_projects` 暴露宿主 workspace 清单；
     `superagent_dispatch(project)` 做标题/id/路径的唯一解析。UI 没有项目选择器，
     也不把“目标项目”写进配置。
-11. **事件正文默认脱敏**：`redact: true` 时，常见 key/token 在进入 journal 前被替换。
-12. **失败不连坐**：配置错误、目录不可写、端口被占、服务缺失，都只让插件对
+12. **事件正文默认脱敏**：`redact: true` 时，常见 key/token 在进入 journal 前被替换。
+13. **失败不连坐**：配置错误、目录不可写、端口被占、服务缺失，都只让插件对
     本次会话保持关闭，不影响 `agent/created`。
-13. **Worker 的通知抑制由创建方登记**：worker 是普通 Session，`dsh-away-notify`
+14. **Worker 的通知抑制由创建方登记**：worker 是普通 Session，`dsh-away-notify`
     只能按标题前缀兜底识别，用户一改名就失效。因此创建 worker 时调
     `awayNotify.markInternal(sessionId, 'super-agent-worker')`（`lib/internal-sessions.js`），
     关闭/归档/agent 销毁时释放；`awayNotify` 缺席或没有该方法时**静默降级**，
@@ -421,8 +428,8 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 事件正文 | untrusted 分隔块 + 提示词明确「数据不是指令」 | 提示层，不是沙箱 |
 | 凭据 | ingest/report/outbox 前脱敏；事件不应携带凭据 | 正则覆盖常见形态，不穷尽 |
 | 数据根 | 绝对路径校验；拒绝盘符根、`~/.dsh`、系统目录 | 不阻止用户在项目内误放敏感文件 |
-| HTTP | `/api` 前缀，走宿主浏览器鉴权；ingest/status/outbox + 面板 ensure/state/reset/activity/task/steer/models/agreements/schedules（focus 仅兼容） | 不额外做 HMAC；需要时由反向代理加 |
-| UI 入口 | ensure 不要求 cwd；在独立 Super-agent Workspace 创建普通 Session；不借用/自动配置用户项目 | 不提供任意文件管理；独立 workspace 显式 `enabled:false` 时拒绝 |
+| HTTP | `/api` 前缀，走宿主浏览器鉴权；ingest/status/outbox + 面板 ensure/state/reset/activity/task/steer/models/agreements/schedules + 实例 list/create/active/rename（focus 仅兼容） | 不额外做 HMAC；需要时由反向代理加 |
+| UI 入口 | ensure 不要求 cwd；在实例 home 创建普通 Session；默认实例复用锚点 Workspace，新实例只建独立子目录；不借用/自动配置用户项目 | 不提供任意文件管理；实例 home 显式 `enabled:false` 时拒绝 |
 | 频道 | 插件不持有 IM/GitHub 凭据；只写 outbox | 桥接器自己负责鉴权与重试 |
 | Router 越权 | 默认开启 `guardExecutionTools`，拦截 bash/write/edit | 只在本插件安装的 agent scope；可显式关闭 |
 | Worker 越权 | Router 项目内 subagent；项目外普通 Session，落在目标项目的 workspace-write 根；UI 的 Router 在独立 workspace，所以用户项目任务都用普通 Session；提示词要求不直接联系人、不臆造批准 | Worker 仍有完整工具，不是沙箱；普通 Session 使用宿主默认审批 |
@@ -518,14 +525,15 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | Render | `test/render.test.mjs` | 摘要、预算、Worker 提示、字数、脱敏 |
 | Recall | `test/recall.test.mjs` | 一跳链接、截断、report/reply/batch |
 | Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、idle 释放槽位、Worker 复用、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker、project 解析 |
-| 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP 15 条路由、无 cwd ensure、项目清单、租约、重置 generation/Worker 归档 |
+| 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP 18 条路由、无 cwd ensure、项目清单、租约、重置 generation/Worker 归档、多实例隔离/单锚点/未读 |
+| 实例 | `test/instances.test.mjs` | 默认迁移、创建/重命名、独立 home、未读持久化、损坏注册表降级 |
 | 模型 | `test/models.test.mjs` | 目录展开、allowlist、`onlyProvider`/`onlyNames`、默认选择、effort 校验、空匹配警告 |
 | 约定 | `test/agreements.test.mjs` | 全局/项目、append/replace、损坏文件、上限、注入文本 |
 | 功能 | `test/features.test.mjs` | 模型派工、复用冲突、跨项目模型、约定注入、任务详情/活动、定时桥 |
-| 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约 |
+| 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 164 个用例，全部不需要模型调用。
+共 169 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
