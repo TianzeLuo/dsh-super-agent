@@ -225,3 +225,14 @@ test('面板表面使用宿主真实主题 token，深色模式不会退化成�
   assert.match(source, /const T = \{/)
   assert.doesNotMatch(source, /var\(--dsw-alias-(bg-primary|bg-secondary|bg-elevated|fg-primary|accent)\b/, 'these token names do not exist in DSH and fall back to light-only colors')
 })
+
+test('任务详情占满右侧栏，Worker 模型只在抽屉里设置', () => {
+  assert.match(source, /detailOverlay: \{[\s\S]*?inset: 0,[\s\S]*?width: '100%'/, 'detail must stay inside the rail so it cannot overlap the composer')
+  assert.doesNotMatch(source, /sa-model-chip|quickSaveModel/, 'no duplicate header model selector')
+  assert.match(source, /modelsToggleHint/)
+  assert.match(source, /colorScheme: 'light dark'/, 'native controls should follow the host color scheme')
+  assert.doesNotMatch(source, /h\('select'/, 'dropdowns must be themed, not native white popups')
+  assert.match(source, /function SelectMenu/)
+  assert.doesNotMatch(source, /type: 'checkbox'/, 'model allowlist uses a themed checkbox, not the native control')
+  assert.match(source, /role: 'checkbox'/)
+})

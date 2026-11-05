@@ -1,6 +1,6 @@
 {
   "name": "dsh-super-agent",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "DSH plugin: two-layer Router/Worker super-agent runtime — durable triggers, project-aware autonomous dispatch, thread subscriptions, Inline & Spill recall, async dispatch, watchdog, and channel outbox.",
   "type": "module",

@@ -97,7 +97,15 @@
     DSH 公开的 `--dsw-alias-bg-base/layer-1/layer-2`、`--dsw-alias-label-*` 和
     `--dsw-alias-border-l*`；禁止再用 `--dsw-alias-bg-primary` 之类不存在的 token
     配白底 fallback。旧宿主缺 token 时退回 `Canvas`/`CanvasText`，随浏览器 color-scheme。
-16. **内部 Worker 行不随面板卸载而泄露**：只把隐藏 CSS 放在面板里不够——打开 Worker
+16. **任务详情不越出活动栏**：详情覆盖层使用活动栏宽度（`inset: 0; width: 100%`），
+    不再向对话区扩展，因此不会与底部 composer 重叠；设置抽屉仍可覆盖对话区。
+17. **默认 Worker 模型只在抽屉里设置**：顶栏只保留一个「Worker 模型」入口，
+    抽屉内逐项勾选模型、设置默认模型和 effort；不再维护第二套 header 快捷选择器。
+18. **下拉菜单自绘，不依赖原生弹层**：原生 `select` 的弹出菜单在深色下仍可能白底，
+    且无法完全跟随 DSH token；模型、effort、规则作用域、定时类型和星期都走
+    `SelectMenu`（按钮 + `position: fixed` 菜单 + `aria-haspopup/listbox`），
+    颜色只取 `T`，点击外部、`Escape`、窗口 resize/scroll 都会关闭。
+19. **内部 Worker 行不随面板卸载而泄露**：只把隐藏 CSS 放在面板里不够——打开 Worker
     聊天会卸载面板，侧栏立刻恢复显示。浏览器半部在 `document.head` 放一份持久 style，
     并按 `Super-agent worker ·` 标题前缀给旧 generation 的行打标记；隐藏规则和观察器
     挂在 `apply` 上，不在组件卸载时移除。
@@ -509,7 +517,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 161 个用例，全部不需要模型调用。
+共 162 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
@@ -541,7 +549,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 1. 左栏出现「Super-agent」，点击后 main 面板嵌入官方 Conversation；输入框、
    模型选择、Workspace Write 与消息流都来自官方组件。
 2. 页面打开时 `/ui/ensure` 不传 cwd，自动创建/恢复独立 Super-agent Workspace
-   里的 Router；`owner.json` / `router.json` 写入。面板没有 `<select>`，不需要先
+   里的 Router；`owner.json` / `router.json` 写入。面板没有原生 `<select>`，不需要先
    选工作区，也不借用用户项目。
 3. 全新 DSH home（无 Router 指针、一个 workspace）下打开空白 Router：面板固定
    active，官方 hero 不渲染，WorkspaceChip/工作区选择列表为 0，直接出现 composer。
