@@ -111,10 +111,21 @@ test('absolute dataDir outside the project is allowed, but account/system roots 
   assert.equal(gate.dataDir, target)
 
   assert.match(checkDataDir(join(homedir(), '.dsh', 'super-agent')), /账户目录/)
-  assert.match(checkDataDir('/etc/super-agent'), /系统目录/)
+  const systemPath = process.platform === 'win32'
+    ? join(process.env.SystemRoot ?? 'C:\\Windows', 'super-agent')
+    : '/etc/super-agent'
+  assert.match(checkDataDir(systemPath), /系统目录/)
   assert.match(checkDataDir('/'), /文件系统根/)
   assert.match(checkDataDir('relative/path'), /绝对路径/)
   assert.match(checkDataDir('~/state'), /~/)
+})
+
+test('Windows default data root is allowed while the account .dsh stays blocked', () => {
+  if (process.platform !== 'win32') return
+  const home = homedir()
+  const workspace = defaultSuperAgentWorkspaceHome(process.env, 'win32', home)
+  assert.equal(checkDataDir(join(workspace, '.dsh', 'super-agent')), undefined)
+  assert.match(checkDataDir(join(home, '.dsh', 'super-agent')), /账户目录/)
 })
 
 test('config warnings do not throw and keep defaults', () => {

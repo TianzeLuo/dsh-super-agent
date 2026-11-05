@@ -427,6 +427,10 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | Router 越权 | 默认开启 `guardExecutionTools`，拦截 bash/write/edit | 只在本插件安装的 agent scope；可显式关闭 |
 | Worker 越权 | Router 项目内 subagent；项目外普通 Session，落在目标项目的 workspace-write 根；UI 的 Router 在独立 workspace，所以用户项目任务都用普通 Session；提示词要求不直接联系人、不臆造批准 | Worker 仍有完整工具，不是沙箱；普通 Session 使用宿主默认审批 |
 
+Windows 上 `%LOCALAPPDATA%\dsh-super-agent\workspace` 是合法默认数据根，
+因此不把整个 `C:\Users` 当作系统目录；账户自己的 `~/.dsh` 仍单独拒绝。
+Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/ProgramData 仍拒绝。
+
 文章 §8.4 的「凭据不进入模型上下文」在本插件里是**设计约束**，不是强制机制：
 桥接器应尽量在 outbox 之外完成发送，事件正文不应包含密钥。
 
@@ -521,7 +525,7 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 163 个用例，全部不需要模型调用。
+共 164 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
