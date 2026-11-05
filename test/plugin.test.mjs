@@ -187,6 +187,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
     'superagent_agreement',
     'superagent_close',
     'superagent_dispatch',
+    'superagent_goal',
     'superagent_models',
     'superagent_projects',
     'superagent_recall',
@@ -199,7 +200,9 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
   assert.equal(first.sections[0].name, 'super-agent:router')
   assert.match(first.sections[0].text, /two-layer super-agent/)
   assert.equal(first.contexts.length, 1)
-  assert.equal(first.ctx.count('tools/pre-execute'), 1)
+  // 两个 pre-execute 监听：confirmation 守卫 + 宿主 goal 工具拒绝（假宿主没有
+  // tools.guard，因此走 pre-execute 兜底）。真实宿主优先用 tools.guard。
+  assert.equal(first.ctx.count('tools/pre-execute'), 2)
   assert.ok(existsSync(join(root, '.dsh', 'super-agent', 'journal.jsonl')))
   assert.ok(existsSync(join(root, '.dsh', 'super-agent', 'owner.json')))
   assert.deepEqual([...sys.routes.keys()].sort(), [
@@ -248,7 +251,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
   const third = fakeAgent({ id: 'session-3', cwd: root })
   sys.agents.set(third.id, third)
   sys.emit('agent/created', { agent: third })
-  assert.equal(third.tools.size, 10)
+  assert.equal(third.tools.size, 11)
   sys.emit('agent/disposed', { agent: third })
 })
 
@@ -354,7 +357,7 @@ test('UI ensure creates a Router through the generic Session API and focus updat
   assert.equal(pointer.ui, true)
   assert.equal(pointer.sessionId, body.sessionId)
   const router = sys.agents.get(body.sessionId)
-  assert.equal(router.tools.size, 10)
+  assert.equal(router.tools.size, 11)
 
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
@@ -446,7 +449,7 @@ test('UI ensure without cwd uses an independent Super-agent workspace', async ()
   assert.ok(existsSync(join(home, '.dsh', 'super-agent.json')))
   assert.deepEqual(created.map((workspace) => [workspace.title, workspace.path]), [['Super-agent Workspace', home]])
   assert.deepEqual(attached, [body.sessionId])
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 10)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 11)
   const projectTool = await sys.agents.get(body.sessionId).tools.get('superagent_projects').execute({}, {})
   assert.deepEqual(projectTool.projects.map((project) => project.title), ['alpha'])
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
@@ -631,7 +634,7 @@ test('the dedicated Router takes precedence over an older project Router', async
   const old = fakeAgent({ id: 'session-old-project-router', cwd: root })
   sys.agents.set(old.id, old)
   sys.emit('agent/created', { agent: old })
-  assert.equal(old.tools.size, 10)
+  assert.equal(old.tools.size, 11)
 
   const ensure = sys.routes.get('/api/super-agent/ui/ensure')
   const response = await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
@@ -642,7 +645,7 @@ test('the dedicated Router takes precedence over an older project Router', async
   assert.equal(response.status, 200)
   assert.equal(body.projectRoot, home)
   assert.notEqual(body.sessionId, old.id)
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 10)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 11)
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
   )
@@ -712,7 +715,7 @@ test('UI reset starts a fresh dataDir generation and archives active workers', a
   assert.match(body.dataDir, /super-agent-resets[\\/]gen-/)
   assert.ok(archived.every((sessionId) => sessionId !== oldSession))
   assert.ok(archived.includes(activeWorker))
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 10)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 11)
   const state = await (await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
   )).json()
@@ -753,7 +756,7 @@ test('UI ensure initializes a bare project with the minimal enable config', asyn
   const config = JSON.parse(readFileSync(join(root, '.dsh', 'super-agent.json'), 'utf8'))
   assert.equal(config.enabled, true)
   assert.equal(config.version, 1)
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 10)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 11)
   sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
 })
 

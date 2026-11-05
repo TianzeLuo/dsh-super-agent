@@ -20,6 +20,9 @@
 - **长期工作约定**：用户说「以后都这样」后，Router 把它写成全局或项目规则，注入自己
   和每个 Worker；Reset 不会丢。
 - **定时唤醒**：用宿主 `ctx.schedule` 建一次/每日/每周/Cron 任务，到点唤醒 Router 再决定是否派活。
+- **原生目标（objective）**：目标 = 客观目标 + 里程碑 + 显式检查节奏。只在到点检查、
+  Worker 报告或用户指令时推进；创建/更新目标不会唤醒 Router，也不会自动续轮。
+  宿主 goal 的每轮自动续轮在这一条 Router 会话里被禁用（工具摘除 + 执行拒绝 + disarm）。
 - **事件驱动**：外部事件进入持久化 Trigger 队列，程序层过滤后合批给 Router。
 - **Thread 直通**：已归属 Worker 的讨论后续直接投递，不再经过 Router。
 - **可审计**：journal 只追加；活动栏只展示任务，不展示 Worker 内部会话。
@@ -57,6 +60,10 @@ dataDir、模型/规则/定时任务和未读计数；切换实例不会串数�
 - 顶部「Worker 模型」按钮打开统一抽屉：逐个勾选可调用模型、设置默认模型和
   每个模型的 effort 限制；默认值不再在顶栏重复一份。
 - 「Rules」维护长期工作约定；「Schedules」管理定时唤醒。
+- 多步目标用 `superagent_goal`（create/check/update/close/list）：给目标写清完成标准、
+  里程碑和检查节奏。派活时把 `objective_id` 传给 `superagent_dispatch`，Worker 报告
+  会自动记一次检查。旧会话里已暂停的宿主 goal 可用 `action: "import"` 迁移成原生目标，
+  宿主 goal 保持暂停且不再续轮。
 - 「Reset」二次确认后中止当前 Worker、归档旧 Worker 会话、取消绑定当前 Router 的定时任务、
   切换新的数据目录 generation、创建新 Router。
 - Worker 会话和内部 `[super-agent]` trigger 不出现在侧栏/聊天流。
@@ -138,3 +145,5 @@ npm test
 - 跨项目 Worker 使用 DSH 普通 Session，审批走项目默认策略。
 - 插件不直接调用 IM/GitHub API；频道桥读 outbox。
 - 没有删除/清理逻辑；journal、旧 generation 和归档会话都保留。
+- 目标的 `objective.*` 是新增 journal 事件：旧版本读新 journal 会忽略它们，新版本读
+  旧 journal 只是没有目标，两边都不需要 schema 迁移。

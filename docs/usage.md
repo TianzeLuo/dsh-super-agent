@@ -138,6 +138,48 @@ dataDir 里，所以 Reset 不会丢。条目：
 `[super-agent scheduled task]` 框，避免模型把唤醒当成用户即时消息。默认最多
 `schedule.maxActive` 条活跃任务。面板可立即执行一次，不影响下一次时间。
 
+## 目标（objective）
+
+长期目标用 `superagent_goal`，不要用宿主的 `create_goal`。差别是**是否自动续轮**：
+宿主 goal 由 `dsh-goal-round-driver` 在每轮结束时再唤醒一次，Router 会空转；原生
+objective 是**被动**的，只有三种推进来源：
+
+1. **到点检查**：目标的 `cadence` 建一条宿主 schedule，到点唤醒一次，Router 显式
+   `check`；
+2. **Worker 报告**：`superagent_dispatch` 带 `objective_id`，该任务的报告自动记一条
+   `source: "report"` 的检查；
+3. **用户指令**：用户说「继续/汇报/改目标」时由 Router 显式 `check`/`update`。
+
+创建或更新目标**不会**唤醒 Router，也不会排 0 延迟调度。没有 `cadence` 就是
+`manual`，完全靠报告和用户指令推进。
+
+```json
+{
+  "action": "create",
+  "objective": "把 dsh-chatgpt-ui 的 M2 交付完",
+  "milestones": ["接入流式消息", "补齐错误态", "通过 Playwright 回归"],
+  "every_seconds": 3600
+}
+```
+
+- `action`：`create` / `list` / `check` / `update` / `close` / `import`。
+- `check` 可带 `note`、`complete_milestones`（`ms_N` 或原文）、`source`
+  （`user` 默认 / `schedule` / `report`）。
+- `update` 可改文本、里程碑（`milestones` 整体替换，`add_milestones` 追加）、
+  `status`（`active`/`paused`）和节奏；改节奏会先取消旧 schedule。
+- `close` 关闭目标并取消它的检查调度；之后不会再被唤醒。
+- `import` 把当前会话里已有的宿主 goal 迁移成 manual 节奏的目标（宿主 goal 保持
+  暂停，并被 disarm，不再续轮）。Router 启动时也会自动做一次同样的迁移（幂等：
+  同一个 hostGoalId 只迁一次，已完成的 goal 不迁），所以之前 paused 的
+  dsh-chatgpt-ui 交付目标会被自动接管，不需要额外操作。
+
+节奏选择器和 `superagent_schedule` 一样：`every_seconds`（≥60）、`at`、`daily`、
+`weekly`、`cron`。`daily`/`weekly`/`cron` 的墙钟计算交给宿主，目标只保存它返回的
+下一次时间。
+
+**关于宿主 goal**：Router 会话里 `create_goal` / `update_goal` 被摘除并拒绝执行，
+已有的 armed goal 会被 `disarm`，`get_goal` 仍可读。普通会话不受影响。
+
 ## Worker 复用
 
 Worker 默认隔离；同一项目里的连续工作可以复用已有上下文。Router 在

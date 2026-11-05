@@ -120,6 +120,9 @@
     聊天会卸载面板，侧栏立刻恢复显示。浏览器半部在 `document.head` 放一份持久 style，
     并按 `Super-agent worker ·` 标题前缀给旧 generation 的行打标记；隐藏规则和观察器
     挂在 `apply` 上，不在组件卸载时移除。
+20. **目标不自动续轮**：原生 objective 只在三种来源推进（到点检查 / Worker 报告 /
+    用户指令）；创建或更新目标不产生 trigger、不 followup、不排 0 延迟调度。宿主 goal
+    在 Router 会话里被 restrict + guard + disarm，普通会话不变。
 
 ## 4. 事件 intake 算法
 
@@ -312,6 +315,27 @@ queued 任务立即补位；否则 Router 不主动 `close` 时队列会永久�
 插件不维护自己的 cron 循环，也不假设宿主进程一直活着；错过的唤醒由宿主服务
 按自己的策略补偿。Reset 换 Router 会话前会取消旧 Router 的全部活跃 reminder：
 reminder 绑定会话，留着只会唤醒已经隐藏的旧 Router，新 Router 也看不到它们。
+
+### 原生目标（objective）
+
+宿主 goal 的驱动是“每轮结束再叫醒一次”，与 Router“只在事件到来时判断”的定位冲突：
+没有新信息也会被 `goal_round` 唤醒，形成空转。插件因此自带一层目标模型：
+
+- 记录形状：`objective`（完成标准）、`milestones`（`ms_N`，带 done/完成时间）、
+  `cadence`（manual/every/at/daily/weekly/cron）、`checks`（谁因为什么推进了几次）、
+  `taskIds`、`nextCheckAt`；
+- 持久化：journal 只追加 `objective.created/updated/checked/closed`。未知事件在旧版本
+  落 default 分支被忽略，新版本读旧 journal 只是没有目标，因此**不需要 schema 迁移**；
+- 推进来源只有三个：到点的宿主 schedule、挂在目标上的 Worker 报告、用户指令。
+  `createObjective` 不写 trigger、不 followup、不建 0 延迟调度；`checkObjective` 也不
+  排新的唤醒（cadence 的 schedule 由宿主维护）；
+- 节奏 → 宿主 schedule 一一映射（`scheduleSelector`），`daily`/`weekly`/`cron` 的墙钟
+  与 Cron 展开不在插件里复刻，只保存宿主返回的 `scheduledAt`；
+- 宿主 goal 在本会话只读：`tools.restrict` 摘 `create_goal`/`update_goal`，
+  `tools.guard`（缺失时退回 `tools/pre-execute`）拒绝执行，`goals.disarm` 在安装和每次
+  `goal/changed` 时取消续轮授权。不改 DSH 内核，也不影响普通会话；
+- 迁移：`action: "import"` 读取已暂停的宿主 goal，生成 manual 节奏的目标（不复制
+  rounds/activation），并 disarm；宿主 goal 本身保持原状，不删除任何数据。
 
 ### 任务详情与中途指令
 
@@ -530,10 +554,13 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 模型 | `test/models.test.mjs` | 目录展开、allowlist、`onlyProvider`/`onlyNames`、默认选择、effort 校验、空匹配警告 |
 | 约定 | `test/agreements.test.mjs` | 全局/项目、append/replace、损坏文件、上限、注入文本 |
 | 功能 | `test/features.test.mjs` | 模型派工、复用冲突、跨项目模型、约定注入、任务详情/活动、定时桥 |
+| 目标 | `test/objectives.test.mjs` | 创建不唤醒、cadence→schedule、Worker 报告推进、到点检查推进、关闭取消调度、节奏替换、宿主 goal 迁移、journal 回放 |
+| 宿主 goal | `test/host-goals.test.mjs` | restrict 名单、guard 拒绝/放行、pre-execute 兜底、armed 即 disarm、resume 再 disarm、dispose 释放 |
+| 文件链接 | `test/file-link.test.mjs` | 地址解析（session/absolute/盘符/UNC）、无会话才接管、普通会话放行、无接收器回退、读取请求参数 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 169 个用例，全部不需要模型调用。
+共 202 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
