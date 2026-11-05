@@ -237,4 +237,6 @@ test('任务详情占满右侧栏，Worker 模型只在抽屉里设置', () => {
   assert.match(source, /role: 'checkbox'/)
   assert.match(source, /modelsFilterTitle/)
   assert.match(source, /onlyProvider: '', onlyNames: \[\]/)
+  assert.match(source, /fontSize: 10, lineHeight: 1.35, color: T.textTertiary, marginTop: 2, overflowWrap: 'anywhere'/, 'model source sits on its own smaller line')
+  assert.match(source, /marginLeft: 'auto'/, 'enabled badge stays at the right of the first line')
 })

@@ -103,6 +103,8 @@
     抽屉内逐项勾选模型、设置默认模型和 effort；不再维护第二套 header 快捷选择器。
     来源过滤是可选的；激活时抽屉必须同时显示「当前 N / DSH 共 M」和一键清空
     `onlyProvider`/`onlyNames` 的入口，避免用户误以为宿主只有 N 个模型。
+    每行模型的第一行是模型名 + 右侧启用标识；来源 `Provider/model` 单独占一行，
+    使用 10px tertiary 色，不跟随模型名的 11.5px 字号。
 18. **下拉菜单自绘，不依赖原生弹层**：原生 `select` 的弹出菜单在深色下仍可能白底，
     且无法完全跟随 DSH token；模型、effort、规则作用域、定时类型和星期都走
     `SelectMenu`（按钮 + `position: fixed` 菜单 + `aria-haspopup/listbox`），
