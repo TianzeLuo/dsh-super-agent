@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- **P0：点文件链接后整屏变黑、只能刷新**。预览以前用共享的「弹层」外壳：一层
+  `position: absolute; inset: 0` 的遮罩铺满面板、盖在面板内容之上（`S.backdrop`，
+  `background: T.mask`）。面板占的就是宿主整个主区域，所以遮罩一上就是「整个界面
+  变黑」；遮罩默认接收指针事件，面板因此整体点不动，唯一可以点的只有右侧那条抽屉
+  （正文若还在加载/报错，看起来就是彻底卡死）。改成**真正的右侧抽屉**：贴面板右侧、
+  宽 520/640、`top/bottom: 0`、正文自己滚动、**不画遮罩**，`Esc` / ✕ / 点抽屉外
+  关闭，`z-index` 在面板内容之上、宿主对话框之下。另加**渲染错误边界**：官方
+  `CodeBlock`/`MarkdownText` 渲染期抛错时只让抽屉正文显示错误态（消息 + 重试），
+  面板与宿主界面继续可用；面板整体也包了一层边界，最坏情况是面板里一张错误卡片，
+  不再是黑屏。回归用例 `test/preview-drawer.test.mjs`，截图见
+  `docs/screenshots/preview-drawer-*.png`。
+
 - **点通知不跳转（多实例）**：面板只把 `panelId` / retain 来源注册给
   `dsh-away-notify`，没注册 `showSession`，所以点击最多把面板选中——面板仍停在它当时
   显示的实例上，且 away-notify 完全没有实例概念（`layout.selectPanel` 是它唯一能做的

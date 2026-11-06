@@ -96,6 +96,12 @@ ensure）并 adopt 那条会话；面板顶部给一条可撤销的提示（「�
   取，写成 `ctx.remote.workspaceFiles` 会因未声明 inject 而抛错；接口或官方组件缺席时
   预览给出可读提示和重试按钮，面板照常工作。PDF/Office/视频面板不渲染，提示用官方
   链接查看。普通会话里的文件链接仍然走官方右侧栏，行为不变。
+  预览是**右侧抽屉**：贴面板右侧、宽 640（设置类 520）、高 100%、正文自己滚动，
+  **不画遮罩**——左栏、顶部和输入框始终可见可点；`Esc`、右上角 ✕、点抽屉外都能关。
+  官方渲染器万一在渲染期抛错，只让抽屉正文显示错误态（含「重试」），面板和宿主界面
+  都不受影响，不需要刷新。截图：`docs/screenshots/preview-drawer-{light,dark}.png`
+  （生成脚本 `test/manual/make-preview-screenshots.mjs`，用的是 `lib/client.js` 里
+  真实的样式对象）。
 
 ### Worker 复用
 
