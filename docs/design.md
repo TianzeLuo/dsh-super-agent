@@ -159,8 +159,11 @@
 24. **导航排障默认零成本**：`?navdebug=1` 才订阅 `panelInfo`、监听焦点/可见性，并把
     `activePanelId`/实例/会话变化连调用栈累积到 `window.__SA_NAV_LOG__`。关闭时只有一次
     字符串判断——排障开关本身不能改变导航行为，也不能给「谁改了面板选择」引入新变量。
-    自动跟随可关（`localStorage['dsh.super-agent.navFollow']`）：这是面板侧对 away-notify
-    「回到前台就跳会话」的抑制，比全局关 `openOnClick` 精准（后者连点击一起废掉）。
+    自动跟随**默认关**（`localStorage['dsh.super-agent.navFollow'] === 'on'` 才开）：这是面板侧
+    对 away-notify「回到前台就跳会话」的抑制，比全局关 `openOnClick` 精准（后者连点击一起废掉）。
+    页面内无法区分「点通知」和「切焦点」——away-notify 只有 `consumePendingFocus → focusPanel →
+    showSession(sessionId)` 一条通路（`client.js:520`），不带来源标记；所以默认只提示 + 「定位」，
+    开关打开才恢复自动跳。
 
 ## 4. 事件 intake 算法
 
@@ -536,7 +539,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 刚打开面板就被切走 | 宿主的自动关闭路径（注册表抖动 / openSession 回退 / 归档清空）在无手势时触发 | `?navdebug=1` 后看 `__SA_NAV_LOG__` 的 `nav.close`（带关闭栈）与 `nav.restored`；守卫默认开，`localStorage['dsh.super-agent.navGuard']='off'` 可关 |
 | 点文件后整屏变黑 / 点不动 | 预览用了铺满面板的遮罩外壳，或渲染期抛错卸载了整棵树 | `docs/screenshots/preview-drawer-*.png`；真机上按 `Esc` 应能关闭，控制台看 `[super-agent] render failed` |
 | 点通知不跳转 / 跳错实例 | 没注册 `showSession`；或 `/ui/state` 里没有该会话的 Router（已关闭/归档） | 地址栏 `?navdebug=1` 后看 `__SA_NAV_LOG__` 的 `reveal.*`；提示条会写明「认不出实例」 |
-| 回到窗口时被切到别的会话 | away-notify 的待跳转会话在发通知时就写入、任意焦点恢复时消费（90 秒有效） | `__SA_NAV_LOG__` 里 `panel` 事件的调用栈；不需要时在提示条点「以后不自动跟随」 |
+| 回到窗口时被切到别的会话 | away-notify 的待跳转会话在发通知时就写入、任意焦点恢复时消费（90 秒有效） | 自动跟随默认关：只提示不跳，点「定位」再跳；顶部「跟随：关」可打开；`__SA_NAV_LOG__` 里 `panel` 事件带调用栈 |
 
 ## 14. 扩展点
 
@@ -615,14 +618,14 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 宿主 goal | `test/host-goals.test.mjs` | restrict 名单、guard 拒绝/放行、pre-execute 兜底、armed 即 disarm、resume 再 disarm、dispose 释放 |
 | 文件链接 | `test/file-link.test.mjs` | 地址解析（session/absolute/盘符/UNC）、无会话才接管、普通会话放行、无接收器回退、读取请求参数 |
 | 文件预览 | `test/file-preview.test.mjs` | 注入面形状（宿主 `WorkspaceFiles`）、`read`/`readBytes` 参数与 `RemoteResult` 拆解、图片后缀→媒体类型、正文交给官方 `CodeBlock`/`MarkdownText`、行号对齐、截断与降级文案、二进制/缺组件提示 |
-| 通知点击落点 | `test/notification-nav.test.mjs` | 点击 → 面板/实例/会话三者都被请求、已在目标仍定位、状态读不到也不中止、会话→实例只信 `routers`、挂载前排队取一次即清空、`?navdebug=1` 才有订阅与 `__SA_NAV_LOG__`（关闭零副作用）、自动跟随开关持久化 |
+| 通知点击落点 | `test/notification-nav.test.mjs` | 点击 → 面板/实例/会话三者都被请求、已在目标仍定位、状态读不到也不中止、会话→实例只信 `routers`、挂载前排队取一次即清空、`?navdebug=1` 才有订阅与 `__SA_NAV_LOG__`（关闭零副作用）、自动跟随默认关、显式 on 才跟随、开关持久化 |
 | 预览抽屉 | `test/preview-drawer.test.mjs` | 抽屉样式（右侧、520/640、无 `inset`、无遮罩、z-index 在对话框之下）、文件预览走 `drawer` 变体、正文有错误边界、`Esc`/点外部关闭且解绑干净、输入框里的 `Esc` 不关、抽屉自己的下拉菜单算「里面」、错误边界接住异常并在抽屉内显示、错误摘要不塞整段栈、面板槽位整体有边界 |
 | 面板守卫 | `test/nav-guard.test.mjs` | 无手势的自动切走被拦（三条宿主路径）、有手势放行、手势一次性（点开面板不替随后的自动关闭背书）、打开本面板/面板未激活/条目消失时放行、直接写 store 时条目还在就恢复、解绑恢复原方法并移除监听、开关关闭与冻结服务不崩 |
 | 面板状态 | `test/panel-state.test.mjs` | 可见即已读（+1 与清零同一判定）、离开 3 条→可见归零、心跳过期/换实例/面板关闭计未读、面板可见性=页面可见+布局选中、重挂续接原会话、事件回调不改当前选择 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 264 个用例，全部不需要模型调用。
+共 266 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
