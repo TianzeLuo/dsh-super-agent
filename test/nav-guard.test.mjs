@@ -56,7 +56,7 @@ test('没有用户手势的自动切换被拦下（宿主三条自动关闭路�
     layout,
     document: doc,
     now: () => 1_000,
-    storage: { getItem: () => null },
+    storage: { getItem: () => 'on' },
     isRegistered: () => true,
   })
 
@@ -81,7 +81,7 @@ test('用户手势（点击/按键/前进后退）之内的切换照常放行', 
     layout,
     document: doc,
     now: () => clock,
-    storage: { getItem: () => null },
+    storage: { getItem: () => 'on' },
     isRegistered: () => true,
   })
 
@@ -107,7 +107,7 @@ test('手势是一次性令牌：点开面板那一下不给随后的自动关�
     layout,
     document: doc,
     now: () => clock,
-    storage: { getItem: () => null },
+    storage: { getItem: () => 'on' },
     isRegistered: () => true,
   })
 
@@ -144,7 +144,7 @@ test('手势过期、打开本面板、面板不是我们时都不拦', () => {
     layout,
     document: doc,
     now: () => clock,
-    storage: { getItem: () => null },
+    storage: { getItem: () => 'on' },
     isRegistered: () => true,
   })
 
@@ -170,7 +170,7 @@ test('插件卸载/条目真的消失时放行（不硬撑一个不存在的面�
     layout,
     document: doc,
     now: () => 1_000,
-    storage: { getItem: () => null },
+    storage: { getItem: () => 'on' },
     isRegistered: () => false,
   })
   assert.equal(layout.selectPanel(null), undefined)
@@ -187,7 +187,7 @@ test('解绑后恢复原方法、移除监听；关掉开关就完全不改宿�
     layout,
     document: doc,
     now: () => 1_000,
-    storage: { getItem: () => null },
+    storage: { getItem: () => 'on' },
     isRegistered: () => true,
   })
   assert.notEqual(layout.selectPanel, original)
@@ -209,9 +209,42 @@ test('解绑后恢复原方法、移除监听；关掉开关就完全不改宿�
   assert.equal(offLayout.selectPanel, offOriginal, '关掉后不包装')
   assert.equal(offDoc.count(), 0, '关掉后不监听')
   assert.equal(internals.navGuardEnabled({ getItem: () => 'off' }), false)
-  assert.equal(internals.navGuardEnabled({ getItem: () => null }), true)
-  assert.equal(internals.navGuardEnabled({ getItem: () => { throw new Error('denied') } }), true)
+  assert.equal(internals.navGuardEnabled({ getItem: () => null }), false, '默认关：没有开关值就不拦导航')
+  assert.equal(internals.navGuardEnabled({ getItem: () => 'on' }), true, '只有显式 on 才启用')
+  assert.equal(internals.navGuardEnabled({ getItem: () => { throw new Error('denied') } }), false)
   off()
+})
+
+test('默认关，且会拆掉上一版默认开启时留在 window 上的守卫', () => {
+  const { __internals: internals, __window: win } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const original = layout.selectPanel
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 1_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+  })
+  assert.notEqual(layout.selectPanel, original, '显式 on 时装上')
+  assert.equal(layout.selectPanel(null), false)
+  assert.ok(win[internals.NAV_GUARD_REGISTRY_KEY], '注册表在 window 上')
+
+  // 新版默认关：同一页面再次 apply（HMR 重载）时，必须把上一版的守卫拆掉，
+  // 不能因为「同一个 layout 已有主」就提前返回、继续拦原生导航。
+  const noop = internals.installNavGuard({}, {
+    layout,
+    document: fakeDocument(),
+    now: () => 2_000,
+    storage: { getItem: () => null },
+    isRegistered: () => true,
+  })
+  assert.equal(layout.selectPanel, original, '默认关时恢复宿主原方法')
+  assert.equal(win[internals.NAV_GUARD_REGISTRY_KEY], undefined, '注册表清掉')
+  assert.equal(layout.selectPanel(null), undefined, '放行原生导航')
+  guard()
+  noop()
 })
 
 test('宿主直接写 store（retainMainPanels）也会被拦：条目还在就恢复，条目没了就放行', async () => {
@@ -229,7 +262,7 @@ test('宿主直接写 store（retainMainPanels）也会被拦：条目还在就�
     layout,
     document: doc,
     now: () => 1_000,
-    storage: { getItem: () => null },
+    storage: { getItem: () => 'on' },
     isRegistered: () => registered,
   })
 
@@ -262,7 +295,7 @@ test('冻结的 layout / 缺失的 layout 都不会让插件崩', () => {
   const frozen = Object.freeze({ panelInfo: { getSnapshot: () => ({ activePanelId: 'super-agent' }) }, selectPanel() {} })
   const doc = fakeDocument()
   assert.doesNotThrow(() => {
-    const dispose = internals.installNavGuard({}, { layout: frozen, document: doc, now: () => 1_000, storage: { getItem: () => null } })
+    const dispose = internals.installNavGuard({}, { layout: frozen, document: doc, now: () => 1_000, storage: { getItem: () => 'on' } })
     dispose()
   })
   assert.doesNotThrow(() => internals.installNavGuard({}, { layout: undefined, document: undefined })())
@@ -273,8 +306,8 @@ test('同一个 layout 只包一层（ctx.inject 重复回调也不会叠包装�
   const layout = fakeLayout('super-agent')
   const doc = fakeDocument()
   const original = layout.selectPanel
-  const first = internals.installNavGuard({}, { layout, document: doc, now: () => 1_000, storage: { getItem: () => null }, isRegistered: () => true })
-  const second = internals.installNavGuard({}, { layout, document: doc, now: () => 1_000, storage: { getItem: () => null }, isRegistered: () => true })
+  const first = internals.installNavGuard({}, { layout, document: doc, now: () => 1_000, storage: { getItem: () => 'on' }, isRegistered: () => true })
+  const second = internals.installNavGuard({}, { layout, document: doc, now: () => 1_000, storage: { getItem: () => 'on' }, isRegistered: () => true })
   assert.equal(doc.count(), 6, '第二层不再挂监听')
   assert.equal(layout.selectPanel(null), false, '只有一层照样拦')
   second()
@@ -328,6 +361,40 @@ test('无手势的跨会话跳转被拦下（away-notify 的 pendingFocus 走 op
   assert.equal(queued?.reason, 'blocked-switch')
   guard()
   assert.equal(typeof workspace.openSession, 'function')
+})
+
+test('默认关：away-notify 原生跳转（openSession / replaceMain / selectPanel）原样放行', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const sessions = fakeSessions('s-1')
+  const originalOpen = workspace.openSession
+  const originalSessionOpen = sessions.open
+  const originalSelect = layout.selectPanel
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    // 缺省（没有 localStorage 开关）→ 默认放行
+    now: () => 1_000,
+    storage: { getItem: () => null },
+    isRegistered: () => true,
+    sessions,
+    workspace,
+  })
+
+  assert.equal(workspace.openSession, originalOpen, '不包宿主对话打开器')
+  assert.equal(sessions.open, originalSessionOpen, '不包 sessions.open')
+  assert.equal(layout.selectPanel, originalSelect, '不包 selectPanel')
+  assert.equal(doc.count(), 0, '不挂任何手势/可见性监听')
+
+  // 模拟 away-notify「点通知 / 回到前台消费 pendingFocus」的宿主链路。
+  workspace.openSession('s-2')
+  layout.selectPanel(null)
+  assert.deepEqual(workspace.opened, ['s-2'], '普通会话点通知照常跳回该会话')
+  assert.deepEqual(layout.calls, [null], '面板按宿主语义让位，不会被我们抢回来')
+  assert.equal(internals.takePanelReveal(), undefined, '不排队「定位」提示，不降级')
+  guard()
 })
 
 test('点通知（页面内有手势）后同一个跳转放行；手势窗口过了就恢复拦截', () => {

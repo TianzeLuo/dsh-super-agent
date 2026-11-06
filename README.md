@@ -56,42 +56,25 @@ dataDir、模型/规则/定时任务和未读计数；切换实例不会串数�
 「`document.visibilityState` 可见 + `layout.panelInfo.activePanelId` 是本面板」
 上报，和清零共用这一个定义。
 
-**打开面板被自动切走**：宿主有三条不经过点击就能关掉面板的路径——
-`ui-layout` 的 `retainMainPanels`（`lib/client.js:410`，main 槽注册表每次变动都跑，
-条目瞬时缺失就把 `activePanelId` 置空）、`ui-workspace` 的 `replaceMain(…, 'reveal')`
-（`:1673`，任何 `uiWorkspace.openSession` 都会走它，包括通知落点回退）和
-`clearMain()`（`:1649`）。插件装了**面板守卫**：本面板激活期间，切走必须伴随
-**最近 1.5 秒内的一次真实手势**（pointerdown / mousedown / keydown / popstate /
-hashchange），而且手势是**一次性令牌**——点开面板那一下不替随后 1.5 秒里的自动关闭
-背书。没有手势的关闭会被拦下并记进 `__SA_NAV_LOG__`（`nav.blocked` / `nav.restored`
-带关闭时的调用栈）；直接写 store 的路径先等一个 tick，条目还在就把面板恢复回来，
-条目真的没了（插件卸载）就放行。用户自己的导航（点会话、点 Conversation、快捷键、
-浏览器前进后退）都带手势，不受影响。排障：`?navdebug=1` 后看 `__SA_NAV_LOG__`；
-不需要时 `localStorage['dsh.super-agent.navGuard'] = 'off'` 关掉守卫。
+**「打开面板被自动切走」的根因不在面板本身**：super-agent 派发的 worker 是普通
+Session（header 上没有 `origin: 'subagent'`），之前会被 dsh-away-notify 当成用户会话，
+在 `turn/end` 时弹通知并写下 `pendingFocus`；下次窗口/标签页回到前台时，away-notify 的
+`consumePendingFocus` 会 `switchTo → replaceMain → selectPanel(null)`，于是面板被关、
+界面跳到没有用户可读内容的 worker 会话。修复放在源头：worker 创建/恢复时由创建方调用
+`awayNotify.markInternal(sessionId, 'super-agent-worker')`（见 `lib/internal-sessions.js`），
+away-notify 的 `rootsOnly` 判定就会按「内部会话」静默，不再产生通知和 pendingFocus。
 
-复现脚本（不启动 dsh，用宿主三条路径的真实语义回放，对比装守卫前后）：
-`node test/manual/repro-panel-yank.mjs --navdebug`。
+**导航守卫默认关**：曾经为了对抗上述症状加过「没有用户手势就不许切走面板 / 不许换会话」
+的守卫，但系统通知点击在页面里没有任何指针事件，这条启发式会把 away-notify 的正常回跳
+一起拦掉（表现为「点通知不跳」）。根因修掉后不再需要默认常开：`installNavGuard` 现在
+默认放行，只有 `localStorage['dsh.super-agent.navGuard'] = 'on'` 才启用，仅用于诊断
+「面板被宿主自动关闭」这类问题；`?navdebug=1` 可看 `__SA_NAV_LOG__`。
+复现脚本：`node test/manual/repro-panel-yank.mjs --navdebug`（`NAV_GUARD=on` 时对比装/不装）。
 
-**「被切走」的另一半：会话跳转**。away-notify 的「回到通知会话」根本不经过
-`selectPanel`，链路是：`dsh-away-notify/lib/client.js:1141`（焦点/可见性恢复）→
-`:959 consumePendingFocus`（POST presence `pending-focus`，宿主在发通知时写下 sessionId，
-TTL 90s）→ `:1003 switchTo` → `:922` 里 `resolveSessionOpener` 拿到
-`uiWorkspace.openSession`（或 0.1.6 的 `sessions.open`）→
-`dsh-client-ui-workspace/lib/client.js:1470 openSession` → `:1651 replaceMain` 里
-`sessions.retain(..., {source:'mainView'})` + `selection.set(...)`，最后才 `selectPanel(null)`。
-所以面板守卫看到时**会话已经换掉了**。我们在守卫里同时包一层会话打开器
-（`uiWorkspace.openSession` / `sessions.open`）：没有用户手势窗口（1.5s）的跨会话跳转
-直接拦下，只排一条面板内「定位」提示（用户点一下才切）。放行「点通知」的信号只有两条确定性的：① 页面内 toast 点击（pointerdown/keydown 等
-手势，1.5s 窗口）；② 通知以**新标签页**打开时 URL 上的 `?dshAwayNotifyFocus=<id>`
-（`dsh-away-notify/lib/host.js:426`），且令牌绑定该 sessionId、只用一次。
-
-**系统通知点击没有确定性信号，所以不自动跳**：通知由宿主用 OS 通知弹出，点击走
-`dshnotify:` 协议把窗口置前（`dsh-away-notify/lib/protocol.js`），协议脚本不回连服务器，
-presence 只有 `pending-focus`/`ack-focus`（`lib/host.js:719`/`:727`），没有「通知被点击」
-的时间戳或计数；页面里也收不到 pointerdown/click。曾经把「文档从 hidden 回到 visible」
-当信号——切标签页/最小化几秒再回来完全一样，会再次「切走」，已删除。方案已选定为「去掉该条」：切标签页与最小化/失焦恢复**同判不跳**（连窗口失焦的
-情况也不发令牌，不再有任何基于时间的放行）。现在被拦下的
-跳转改成：把 Super-agent 面板切到前台 + 面板内「定位」提示条，用户点一下才切。
+**系统通知点击**：完全交给 dsh-away-notify 的原生行为——普通会话点通知正常跳回该会话；
+目标会话被本面板 retain 时由 away-notify 激活面板（`awayNotifyPanels` 显式登记）。
+页面不可见/失焦时弹过的通知会在回到前台时被 away-notify 消费，这是它本来的语义；
+worker 会话不再弹通知，因此不会再把界面带去 worker。
 
 **同一页面只会跑一份**：同一个包的 client 确实可能求值两次——启动时进聚合 boot
 combo（`plugins/??…dsh-super-agent/client.js…&rev=…`），之后 `dsh-client-hmr` 每

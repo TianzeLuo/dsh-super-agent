@@ -3,7 +3,7 @@
  *
  * 这里不启动 dsh：把宿主三条关闭面板的**真实语义**抄成最小桩（文件:行号见注释），
  * 然后按「用户点开面板 → 2 秒内发生一次自动事件」的顺序回放，打印 activePanelId
- * 的每一次变化。守卫打开后再回放一次，对比同一序列。
+ * 的每一次变化。守卫默认关；脚本用 `storage 'on'` 显式打开后再回放一次，对比同一序列。
  *
  * 用法：
  *   node test/manual/repro-panel-yank.mjs
@@ -111,7 +111,8 @@ async function replay({ guard }) {
       layout,
       document: doc,
       now: () => clock,
-      storage: { getItem: () => null },
+      // 守卫默认关：诊断脚本显式打开，才能对比「装 / 不装」。
+      storage: { getItem: () => 'on' },
       isRegistered: () => true,
     })
   }
