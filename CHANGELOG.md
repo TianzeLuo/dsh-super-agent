@@ -27,6 +27,22 @@
   会话），改为提示。请求在面板挂载前排队（away-notify 是 `selectPanel` 之后同步回调），
   挂载后消费；`showSession` 的落点与挂载快照的竞态用 5 秒保护窗避免互相覆盖。
 
+### Fixed
+
+- **刚打开面板就被自动切走**。宿主有三条不经过用户点击就会关掉面板的路径：
+  `ui-layout` 的 `retainMainPanels`（`dsh-client-ui-layout/lib/client.js:410`，`:689`
+  订阅 main 槽、`:614` 取注册表，条目瞬时缺失就把 `activePanelId` 置 null）、
+  `ui-workspace` 的 `replaceMain(…, 'reveal')`（`:1673`，任何
+  `uiWorkspace.openSession` 都经过它，包括 away-notify 的通知落点回退）和
+  `clearMain()`（`:1649`）。插件现在装**面板守卫**：本面板激活期间，
+  `layout.selectPanel` 的「切走」必须带最近 1.5 秒内的真实手势，且手势是一次性令牌
+  （点开面板那一下不替随后的自动关闭背书）；拦下的调用记 `nav.blocked`。
+  直接写 store 的路径（`retainMainPanels`）由 `panelInfo` 订阅兜住：等一个 tick，
+  我们的 main 条目还在就恢复面板（`nav.restored`，附关闭时的调用栈），条目没了就
+  放行。开关：`localStorage['dsh.super-agent.navGuard'] = 'off'`。
+  复现：`node test/manual/repro-panel-yank.mjs --navdebug`；用例
+  `test/nav-guard.test.mjs`。
+
 ### Added
 
 - **导航诊断开关** `?navdebug=1`（默认关闭）：`activePanelId` 变化、实例切换、会话切换

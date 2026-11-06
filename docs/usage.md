@@ -42,6 +42,10 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
   adopt 那条会话，面板顶部给一条可撤销提示。已经在那个实例/面板上也照样定位。
   提示里「以后不自动跟随」只提示不跳转（`localStorage['dsh.super-agent.navFollow']`），
   需要时点「定位」。
+- 打开面板后如果被自动切走（宿主注册表抖动、`openSession` 回退、会话归档都会自动关
+  面板），守卫会拦下没有用户手势的切换并恢复面板；用户自己的点击/快捷键照常生效。
+  排障看 `__SA_NAV_LOG__` 的 `nav.close` / `nav.restored`（带调用栈）；
+  `localStorage['dsh.super-agent.navGuard'] = 'off'` 可关掉守卫。
 - 排障：地址栏加 `?navdebug=1`（默认关闭）。之后每次 `activePanelId` 变化、实例/会话
   切换都连调用栈打到 console（`[super-agent][nav]`），并累积在
   `window.__SA_NAV_LOG__`（最多 500 条）——复现一次「被切走」就能看到调用点。

@@ -56,6 +56,22 @@ dataDir、模型/规则/定时任务和未读计数；切换实例不会串数�
 「`document.visibilityState` 可见 + `layout.panelInfo.activePanelId` 是本面板」
 上报，和清零共用这一个定义。
 
+**打开面板被自动切走**：宿主有三条不经过点击就能关掉面板的路径——
+`ui-layout` 的 `retainMainPanels`（`lib/client.js:410`，main 槽注册表每次变动都跑，
+条目瞬时缺失就把 `activePanelId` 置空）、`ui-workspace` 的 `replaceMain(…, 'reveal')`
+（`:1673`，任何 `uiWorkspace.openSession` 都会走它，包括通知落点回退）和
+`clearMain()`（`:1649`）。插件装了**面板守卫**：本面板激活期间，切走必须伴随
+**最近 1.5 秒内的一次真实手势**（pointerdown / mousedown / keydown / popstate /
+hashchange），而且手势是**一次性令牌**——点开面板那一下不替随后 1.5 秒里的自动关闭
+背书。没有手势的关闭会被拦下并记进 `__SA_NAV_LOG__`（`nav.blocked` / `nav.restored`
+带关闭时的调用栈）；直接写 store 的路径先等一个 tick，条目还在就把面板恢复回来，
+条目真的没了（插件卸载）就放行。用户自己的导航（点会话、点 Conversation、快捷键、
+浏览器前进后退）都带手势，不受影响。排障：`?navdebug=1` 后看 `__SA_NAV_LOG__`；
+不需要时 `localStorage['dsh.super-agent.navGuard'] = 'off'` 关掉守卫。
+
+复现脚本（不启动 dsh，用宿主三条路径的真实语义回放，对比装守卫前后）：
+`node test/manual/repro-panel-yank.mjs --navdebug`。
+
 点通知回到产生它的实例：面板把 `panelId` / retain 来源 / `showSession` 一起注册给
 `dsh-away-notify`（见它的 `docs/plugin-api.md`「面板点击落点」）。点击后先选中面板，
 再用 `/ui/state` 的 `routers` 把会话映射到实例，然后切实例（`/ui/instances/active` +
