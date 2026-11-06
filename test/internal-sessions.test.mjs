@@ -1,5 +1,5 @@
 /**
- * internal-sessions.test.mjs — 「内部会话（Router/worker）→ awayNotify 登记」的纯逻辑测试。
+ * internal-sessions.test.mjs — 「内部 worker 会话 → awayNotify 登记」的纯逻辑测试。
  *
  * 这些用例守住四条硬约束（见 lib/internal-sessions.js 头部）：
  *   1. away-notify 未安装 / API 缺失 / 调用抛错 → 静默降级，绝不抛给 worker 创建路径；
@@ -11,7 +11,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { InternalSessionClaims, INTERNAL_REASON, ROUTER_REASON } from '../lib/internal-sessions.js'
+import { InternalSessionClaims, INTERNAL_REASON } from '../lib/internal-sessions.js'
 
 /** 假 awayNotify 服务：记录登记/释放，可注入抛错。 */
 function fakeService({ throwOnMark = false } = {}) {
@@ -45,27 +45,6 @@ test('register 登记一次，release 撤销一次（reason 用固定标签）',
   assert.deepEqual(service.released, ['session-w1'])
   assert.equal(registry.size, 0)
   assert.equal(registry.claimed, 0)
-});
-
-test('Router 与 worker 各用各的 reason，换服务实例后仍然保持', () => {
-  const first = fakeService()
-  let current = first
-  const registry = new InternalSessionClaims({ service: () => current })
-  registry.register('session-router', ROUTER_REASON)
-  registry.register('session-worker')
-  assert.deepEqual(first.calls, [
-    ['session-router', 'super-agent-router'],
-    ['session-worker', 'super-agent-worker'],
-  ])
-  assert.equal(ROUTER_REASON, 'super-agent-router')
-
-  const second = fakeService()
-  current = second
-  registry.sync()
-  assert.deepEqual(second.calls, [
-    ['session-router', 'super-agent-router'],
-    ['session-worker', INTERNAL_REASON],
-  ], '补登记不能把 Router 的 reason 丢成 worker')
 });
 
 test('重复 register 幂等：同一会话只向服务声明一次', () => {

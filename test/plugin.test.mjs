@@ -464,9 +464,6 @@ test('UI ensure without cwd uses an independent Super-agent workspace', async ()
 test('multiple instances share one anchor workspace while keeping homes and unread isolated', async () => {
   const home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-home-multi-'))
   const sys = fakeCordis()
-  // 两个 Router 都在 away-notify 里登记为内部会话；未读必须照常工作（两条链路解耦）。
-  const away = fakeAwayNotify()
-  sys.provide('awayNotify', away)
   const created = []
   const attached = []
   sys.scoped.workspaceRegistry = {
@@ -549,11 +546,6 @@ test('multiple instances share one anchor workspace while keeping homes and unre
   assert.equal(state.instances.find((row) => row.id === 'default').unread, 1)
   assert.equal(state.instances.find((row) => row.id === create.instance.id).unread, 0)
   assert.equal(state.routerSessionIds.length, 2)
-  assert.deepEqual(
-    away.calls.map(([sessionId]) => sessionId).sort(),
-    [first.sessionId, second.sessionId].sort(),
-    '两个 Router 都登记为内部会话',
-  )
 
   const read = await (await sys.routes.get('/api/super-agent/ui/instances/active').fetch(new Request('http://127.0.0.1/api/super-agent/ui/instances/active', {
     method: 'POST',
@@ -592,7 +584,6 @@ test('multiple instances share one anchor workspace while keeping homes and unre
   assert.equal(cleared.unreadTotal, 0)
   sys.emit('agent/disposed', { agent: sys.agents.get(first.sessionId) })
   sys.emit('agent/disposed', { agent: sys.agents.get(second.sessionId) })
-  assert.deepEqual(away.released.sort(), [first.sessionId, second.sessionId].sort(), 'Router 销毁后撤销登记')
 })
 
 test('UI ensure starts without any user project', async () => {
@@ -862,22 +853,18 @@ async function workerRig({ away } = {}) {
   return { sys, alpha, home, router, tools, dispatch, task, workerId: task?.workerSessionId }
 }
 
-test('Router 与 worker 都登记给 awayNotify，关闭时各自释放', async () => {
+test('worker 创建时登记给 awayNotify，任务关闭时释放', async () => {
   const away = fakeAwayNotify()
   const rig = await workerRig({ away })
   assert.match(rig.workerId, /^session-/)
-  assert.deepEqual(away.calls, [
-    [rig.router.sessionId, 'super-agent-router'],
-    [rig.workerId, 'super-agent-worker'],
-  ], 'Router 先装、worker 后创建；各登记一次（幂等）')
+  assert.deepEqual(away.calls, [[rig.workerId, 'super-agent-worker']], '创建时登记一次（幂等）')
   assert.equal(away.released.length, 0)
 
   await rig.tools.get('superagent_close').execute({ task_id: rig.task.id }, {})
   await new Promise((resolveDelay) => setTimeout(resolveDelay, 100))
-  assert.deepEqual(away.released, [rig.workerId], '任务关闭后必须撤销 worker 登记')
+  assert.deepEqual(away.released, [rig.workerId], '任务关闭后必须撤销登记，不能长期占着')
 
   rig.sys.emit('agent/disposed', { agent: rig.sys.agents.get(rig.router.sessionId) })
-  assert.ok(away.released.includes(rig.router.sessionId), 'Router 销毁后也要撤销登记')
 });
 
 test('awayNotify 缺失时 worker 照常创建（静默降级，不抛）', async () => {
@@ -887,14 +874,11 @@ test('awayNotify 缺失时 worker 照常创建（静默降级，不抛）', asyn
   rig.sys.emit('agent/disposed', { agent: rig.sys.agents.get(rig.router.sessionId) })
 });
 
-test('awayNotify 晚于 super-agent 就绪：补登记 Router 与已经存在的 worker', async () => {
+test('awayNotify 晚于 super-agent 就绪：补登记已经存在的 worker', async () => {
   const rig = await workerRig({})
   assert.match(rig.workerId, /^session-/)
   const away = fakeAwayNotify()
   rig.sys.provide('awayNotify', away)
-  assert.deepEqual(away.calls, [
-    [rig.router.sessionId, 'super-agent-router'],
-    [rig.workerId, 'super-agent-worker'],
-  ], '服务就绪时应补登记活着的 Router 与 worker')
+  assert.deepEqual(away.calls, [[rig.workerId, 'super-agent-worker']], '服务就绪时应补登记活着的 worker')
   rig.sys.emit('agent/disposed', { agent: rig.sys.agents.get(rig.router.sessionId) })
 });
