@@ -66,6 +66,7 @@ test('预览是面板里的一列（对话区让位），宽度可调、有上�
   assert.equal(internals.styles.previewTabScroll.overflowX, 'auto')
   assert.equal(internals.styles.previewTabScroll.overflowY, 'hidden')
   assert.equal(internals.styles.previewPane.overflowY, 'auto')
+  assert.equal(internals.styles.previewBody.flex, '0 0 auto', '正文不能被 flex 压缩后裁掉：长文件要能把整列撑高再滚')
   assert.match(String(internals.styles.previewResizer.cursor), /col-resize/)
   assert.equal(internals.styles.previewResizer.position, 'absolute')
 })
