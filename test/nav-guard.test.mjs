@@ -287,8 +287,12 @@ test('同一个 layout 只包一层（ctx.inject 重复回调也不会叠包装�
 function fakeSessions(current = 's-1') {
   const byId = {}
   if (current !== undefined) byId[current] = { retainedBy: { mainView: 1 } }
+  const opened = []
   return {
+    opened,
     list: { getSnapshot: () => ({ byId, phase: 'ready' }) },
+    // 宿主 0.1.6 的会话打开器之一，守卫必须和 openSession 一样包住。
+    open: (target) => { opened.push(target) },
   }
 }
 
@@ -393,6 +397,56 @@ test('守卫还原时把 openSession 换回原函数（不留包装）', () => {
   assert.notEqual(workspace.openSession, original, '装上后是包装函数')
   guard()
   assert.equal(workspace.openSession, original, '还原必须换回宿主原函数')
+})
+
+test('sessions.open 也被包住：无手势跨会话被拦，还原后换回原函数', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const sessions = fakeSessions('s-1')
+  const originalOpen = sessions.open
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 1_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions,
+    workspace,
+  })
+  assert.notEqual(sessions.open, originalOpen, 'sessions.open 也是会话打开器，必须包住')
+  sessions.open('s-2')
+  assert.deepEqual(sessions.opened, [], '无手势的跨会话跳转被拦')
+  assert.deepEqual(workspace.opened, [], '不会绕道 openSession')
+  guard()
+  assert.equal(sessions.open, originalOpen, '还原必须换回宿主原函数')
+  sessions.open('s-2')
+  assert.deepEqual(sessions.opened, ['s-2'], '还原后放行')
+})
+
+test('ctx.inject 回调重复跑也只包一层（还原后不留包装）', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const workspace = fakeWorkspace()
+  const original = workspace.openSession
+  // 模拟宿主服务重启后再次回调：同一份 workspace 会被交给两次。
+  const ctx = {
+    inject: (deps, callback) => {
+      callback({ uiWorkspace: workspace })
+      callback({ uiWorkspace: workspace })
+    },
+  }
+  const guard = internals.installNavGuard(ctx, {
+    layout,
+    document: fakeDocument(),
+    now: () => 1_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+  })
+  guard()
+  assert.equal(workspace.openSession, original, '叠了两层的话还原只会拆掉最外层，守卫会泄漏')
 })
 
 test('我们不在台上（面板条目已消失）时不干预会话切换', () => {
