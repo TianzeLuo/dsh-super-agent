@@ -164,9 +164,11 @@
 33. **守卫必须防「静默消失」**：非属主实例的还原是空操作；每次可见性变化自愈
     `selectPanel` 包装。面板关闭只有 `clearMain`/`replaceMain` 两处 `selectPanel(null)`，
     前端没有 URL 路由导航。
-32. **「点了通知」必须有精确信号才放行**：系统通知点击在页面里只剩
-    `visibilitychange hidden→visible`（离开 0.4–20s）与 `?dshAwayNotifyFocus=`；
-    同一桌面 Alt-Tab 只有 focus、不放行。一次性令牌只授权一次跨会话跳转。
+32. **「点了通知」只认确定性信号**：系统通知点击在页面里**没有任何信号**（协议
+    脚本不回连服务器，presence 无点击记录），所以不自动跳；只有页面内手势与
+    `?dshAwayNotifyFocus=`（绑 sessionId、一次性）能放行。`visibilitychange` 只用于
+    自愈守卫，绝不当作点击信号（切标签与点通知不可区分）。被拦后把面板切到前台并
+    给「定位」提示条。
 31. **会话跳转也要守卫**：`uiWorkspace.openSession → replaceMain` 先换会话、最后才
     `selectPanel(null)`，只守 `selectPanel` 等于没守。会话打开器必须一起包：无手势
     （1.5s 窗口）的跨会话跳转拦下，降级为面板内「定位」提示；启动导航、目标即当前
@@ -655,7 +657,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 304 个用例，全部不需要模型调用。
+共 310 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
