@@ -89,7 +89,8 @@ TTL 90s）→ `:1003 switchTo` → `:922` 里 `resolveSessionOpener` 拿到
 `dshnotify:` 协议把窗口置前（`dsh-away-notify/lib/protocol.js`），协议脚本不回连服务器，
 presence 只有 `pending-focus`/`ack-focus`（`lib/host.js:719`/`:727`），没有「通知被点击」
 的时间戳或计数；页面里也收不到 pointerdown/click。曾经把「文档从 hidden 回到 visible」
-当信号——切标签页/最小化几秒再回来完全一样，会再次「切走」，已删除。现在被拦下的
+当信号——切标签页/最小化几秒再回来完全一样，会再次「切走」，已删除。方案已选定为「去掉该条」：切标签页与最小化/失焦恢复**同判不跳**（连窗口失焦的
+情况也不发令牌，不再有任何基于时间的放行）。现在被拦下的
 跳转改成：把 Super-agent 面板切到前台 + 面板内「定位」提示条，用户点一下才切。
 
 **同一页面只会跑一份**：同一个包的 client 确实可能求值两次——启动时进聚合 boot
