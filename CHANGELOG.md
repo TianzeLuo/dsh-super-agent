@@ -63,10 +63,13 @@
 
 ### Fixed
 
-- **同一页面跑了两份客户端**（聚合 boot combo + 单独 graph row 各一份）：守卫叠两层、
-  navdebug 订阅两份、away-notify 收到两个 `showSession`，是「面板被切走 / 日志重复」
-  的直接来源。现在用 `window` 上的全局槽做跨闭包单实例：后到者先销毁前一份的安装，
-  守卫按 layout 只包一层，诊断只保一份订阅，away-notify 注册只留一个且注销幂等。
+- **同一页面跑了两份客户端**：启动时聚合 boot combo 一份，之后 `dsh-client-hmr`
+  每 500ms stat 轮询 `lib/client.js`，mtime/size 一变就让浏览器从该行的 one-resource
+  combo 重新求值；旧 entry 没被拆掉时两份闭包同时活着，守卫叠两层、navdebug 订阅两份、
+  away-notify 收到两个 `showSession`。现在用 `window` 上的全局槽做跨闭包单实例：
+  **先到者持有，后到者直接退出并 `console.warn`**（不接管、不重复注册），守卫按 layout
+  只包一层，诊断只保一份订阅，卸载时让出槽位。清理旧实例只需硬刷新页面，不必重启
+  `dsh web`。
 - **预览接口非 ok 时按成功结构取正文**：`readFilePreview` 现在保留 `RemoteResult.error.code`，
   错误态显示「code: 原因」；`previewBodyOf` 遇到非字符串正文只出提示，不再把 `undefined`
   喂给 `CodeBlock`/`MarkdownText`（TypeError 的下游来源）。
