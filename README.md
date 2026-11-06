@@ -72,8 +72,10 @@ dataDir、模型/规则/定时任务和未读计数；切换实例不会串数�
 - 会话里的文件链接（工具行的路径、`@file`、交付卡片）在面板内打开预览抽屉，按行显示、
   可定位到被点的那一行。原因：面板是全局 `main` 面板，右侧栏此时没有「屏上会话」，
   官方 `openResource` 会报 `sidebarRight: no session surface is mounted`；插件改为
-  用公开的 `remote.workspaceFiles` 读一页并在面板里渲染。普通会话里的文件链接仍然
-  走官方右侧栏，行为不变。
+  用公开的 `remote.workspaceFiles` 读一页并在面板里渲染。该能力在浏览器里是独立的
+  Cordis 服务，必须 `ctx.inject(['remote.workspaceFiles'], …)` 取，写成
+  `ctx.remote.workspaceFiles` 会因未声明 inject 而抛错；接口缺席时预览显示提示、
+  面板照常工作。普通会话里的文件链接仍然走官方右侧栏，行为不变。
 
 ### Worker 复用
 

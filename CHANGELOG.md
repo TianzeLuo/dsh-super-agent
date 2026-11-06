@@ -34,3 +34,14 @@
   行号」交给面板自带的预览抽屉（读 `remote.workspaceFiles` 一页并按行渲染）；
   其余情况（普通会话语义、非文件资源、面板已卸载）原样调用官方实现。
   覆盖的工具行路径、`@file` 引用和交付卡片都走同一条 `openResource` 路径。
+
+- **预览抽屉提示「这个宿主没有提供文件读取接口」**（上一轮修复的后续）。`workspaceFiles`
+  在浏览器里不是 `ctx.remote` 的普通属性，而是 api-gateway 装出来的独立 Cordis 服务
+  `remote.workspaceFiles`；cordis 的嵌套服务转发按调用方 fiber 的 `inject` 过滤，插件
+  没声明过就抛 `cannot get property "remote.workspaceFiles" without inject`，旧的
+  `service(ctx, 'remote')` 又把这次 throw 当成「服务不存在」。现在改用官方写法
+  `ctx.inject(['remote.workspaceFiles'], …)` 等命名空间就绪并缓存；读取按宿主契约
+  `read(sessionId, path, { offset, limit }, signal)` 调用，并拆开生成的 `RemoteResult`
+  （`{ ok, value }` / `{ ok: false, error }`）——之前即使拿到接口也会把包络当成正文。
+  接口缺席仍然只显示降级提示，不崩溃。`package.json` 的 `dsh.client.inject` 不需要改：
+  那一层是模块到达顺序，服务可用性由 `ctx.inject` 负责。
