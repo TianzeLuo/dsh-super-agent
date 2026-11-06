@@ -56,13 +56,16 @@ dataDir、模型/规则/定时任务和未读计数；切换实例不会串数�
 「`document.visibilityState` 可见 + `layout.panelInfo.activePanelId` 是本面板」
 上报，和清零共用这一个定义。
 
-**「打开面板被自动切走」的根因不在面板本身**：super-agent 派发的 worker 是普通
+**「打开面板被自动切走」的根因不在面板本身**：super-agent 的 Router 与 worker 都是普通
 Session（header 上没有 `origin: 'subagent'`），之前会被 dsh-away-notify 当成用户会话，
 在 `turn/end` 时弹通知并写下 `pendingFocus`；下次窗口/标签页回到前台时，away-notify 的
 `consumePendingFocus` 会 `switchTo → replaceMain → selectPanel(null)`，于是面板被关、
-界面跳到没有用户可读内容的 worker 会话。修复放在源头：worker 创建/恢复时由创建方调用
-`awayNotify.markInternal(sessionId, 'super-agent-worker')`（见 `lib/internal-sessions.js`），
-away-notify 的 `rootsOnly` 判定就会按「内部会话」静默，不再产生通知和 pendingFocus。
+界面跳到没有用户可读内容的 worker 会话。修复放在源头：安装 Router、创建/恢复 worker 时
+由创建方调用 `awayNotify.markInternal(sessionId, 'super-agent-router' / 'super-agent-worker')`
+（见 `lib/internal-sessions.js`），away-notify 的 `rootsOnly` 判定就会按「内部会话」静默，
+不再产生通知和 pendingFocus。登记只存在 away-notify 自己的内存注册表里，不写 Session
+header，不影响会话列表/历史/其它插件；面板自己的未读徽标走 `session/event` +
+`attendance.js`，照常更新。
 
 **导航守卫默认关**：曾经为了对抗上述症状加过「没有用户手势就不许切走面板 / 不许换会话」
 的守卫，但系统通知点击在页面里没有任何指针事件，这条启发式会把 away-notify 的正常回跳
@@ -74,7 +77,7 @@ away-notify 的 `rootsOnly` 判定就会按「内部会话」静默，不再产�
 **系统通知点击**：完全交给 dsh-away-notify 的原生行为——普通会话点通知正常跳回该会话；
 目标会话被本面板 retain 时由 away-notify 激活面板（`awayNotifyPanels` 显式登记）。
 页面不可见/失焦时弹过的通知会在回到前台时被 away-notify 消费，这是它本来的语义；
-worker 会话不再弹通知，因此不会再把界面带去 worker。
+Router/worker 不再弹通知，因此不会再把界面带去 super-agent 的内部会话。
 
 **同一页面只会跑一份**：同一个包的 client 确实可能求值两次——启动时进聚合 boot
 combo（`plugins/??…dsh-super-agent/client.js…&rev=…`），之后 `dsh-client-hmr` 每
