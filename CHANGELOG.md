@@ -16,6 +16,12 @@
 
 ### Fixed
 
+- **刷新 + 重启后点系统通知仍会被踢回普通会话视图**：根因不是缺入口，而是守卫被
+  静默拆掉——同一个 layout 上第二份实例的还原会连带把守卫卸掉（HMR 卸旧条目时必现），
+  之后 `selectPanel(null)` 与 `replaceMain('reveal')` 都无人拦。现在只有属主能还原，
+  并在每次 `visibilitychange` 自愈（`nav.healed`）；同时把 `replaceMain` 也纳入守卫
+  （`'preserve'` 启动/恢复直接放行，只守 `'reveal'`）。
+
 - **点通知不再跳转（守卫误拦的回归）**：系统通知由 OS 弹出、点击走 `dshnotify:`
   协议置前窗口，页面里没有指针事件，被「无手势跨会话拦截」挡掉了。现在补三条精确
   放行信号：页面内 toast 手势、`?dshAwayNotifyFocus=` URL 参数、以及「文档 hidden →

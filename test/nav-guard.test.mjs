@@ -626,3 +626,85 @@ test('通知以新标签页打开（?dshAwayNotifyFocus=）时也放行一次', 
   assert.deepEqual(workspace.opened, ['s-9'], 'URL 参数带来的那次跳转放行')
   guard()
 })
+
+test('直接 replaceMain(…, "reveal") 的跨会话跳转也被拦（openSession 之外的关闭路径）', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const replaced = []
+  const workspace = {
+    openSession: () => {},
+    replaceMain: (target, _signal, panel) => { replaced.push([target, panel]) },
+  }
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 60_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+
+  workspace.replaceMain('s-2', undefined, 'reveal')
+  assert.deepEqual(replaced, [], '无手势：拦')
+  workspace.replaceMain('s-1', undefined, 'preserve')
+  assert.deepEqual(replaced, [['s-1', 'preserve']], '启动/恢复（preserve）放行')
+  guard()
+})
+
+test('系统通知点回来的 replaceMain("reveal") 用一次性令牌放行一次', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const replaced = []
+  const workspace = { replaceMain: (target, _signal, panel) => { replaced.push([target, panel]) } }
+  let clock = 70_000
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => clock,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+
+  doc.hidden = true
+  doc.fire('visibilitychange')
+  clock += 2_000
+  doc.hidden = false
+  doc.fire('visibilitychange')
+  workspace.replaceMain('s-2', undefined, 'reveal')
+  assert.deepEqual(replaced, [['s-2', 'reveal']], '点通知：跳')
+  workspace.replaceMain('s-3', undefined, 'reveal')
+  assert.equal(replaced.length, 1, '令牌用一次')
+  guard()
+})
+
+test('守卫被外部换掉后，下一次可见性变化自愈（重新装回包装）', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 80_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+  const wrapped = layout.selectPanel
+
+  // 模拟「我们的包装被别人还原/换掉」。
+  layout.selectPanel = function unwrapped() {}
+  doc.hidden = false
+  doc.fire('visibilitychange')
+  assert.equal(layout.selectPanel, wrapped, '自愈：装回原来的包装')
+  guard()
+})
