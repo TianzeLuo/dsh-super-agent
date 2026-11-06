@@ -304,8 +304,20 @@ test('Router 会话常驻 retain：面板关着也算本面板的落点，消失
   internals.syncRouterRetains(undefined)
   assert.equal(retained.size, 1)
 
+  // sessions 服务换实例（客户端热重载）：旧句柄释放，新实例上重新登记。
+  const next = new Map()
+  internals.setRetainSessionsService({
+    retain(sessionId, options) {
+      next.set(sessionId, options)
+      return { release: () => next.delete(sessionId) }
+    },
+  })
+  internals.syncRouterRetains([{ sessionId: 'session-default-router', instanceId: 'default' }])
+  assert.deepEqual([...next.keys()], ['session-default-router'])
+  assert.equal(retained.size, 0, '旧实例的 retain 必须释放')
+
   internals.releaseAllRouterRetains()
-  assert.equal(retained.size, 0)
+  assert.equal(next.size, 0)
 })
 
 test('连续两条不同实例的通知：每次定位都带对应实例，不串台', async () => {
