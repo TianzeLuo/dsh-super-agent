@@ -47,7 +47,10 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
   面板），守卫会拦下没有用户手势的切换并恢复面板；用户自己的点击/快捷键照常生效。
   排障看 `__SA_NAV_LOG__` 的 `nav.close` / `nav.restored`（带调用栈）；
   `localStorage['dsh.super-agent.navGuard'] = 'off'` 可关掉守卫。
-- 排障：地址栏加 `?navdebug=1`（默认关闭）。之后每次 `activePanelId` 变化、实例/会话
+- 文件预览是面板右侧的一列（560px，最宽 640px）：对话区跟着变窄，Esc 或右上角 ✕ 关闭。
+  正文用宿主官方 `CodeBlock` / `MarkdownText`，`.tex`/Markdown 的代码围栏也能正常渲染。
+- 排障：地址栏加 `?navdebug=1`（默认关闭），每条日志带 `source`（`layout.panelInfo` /
+  `layout.selectPanel` / `away-notify.showSession` / `super-agent.*`）。之后每次 `activePanelId` 变化、实例/会话
   切换都连调用栈打到 console（`[super-agent][nav]`），并累积在
   `window.__SA_NAV_LOG__`（最多 500 条）——复现一次「被切走」就能看到调用点。
 

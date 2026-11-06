@@ -156,6 +156,14 @@
     路径由 `panelInfo` 订阅兜住：等一个 tick，我们的 main 条目还在就恢复（`nav.restored`），
     条目没了就放行——不硬撑一个不存在的面板。打开本面板、用户自己的导航（点会话、
     Conversation、快捷键、浏览器前进后退）都不受影响。
+26. **预览是面板里的一列，不是浮层**：`S.drawerPanel` 是 `flex: 0 0 auto; width 560
+    (max 640)` 的 flex 子项，对话区 `flex: 1 1 auto; min-width: 0` 让位——和官方右栏
+    「占一列、内容缩宽」同观感。官方右栏在插件面板里用不了（`ui-sidebar-right` 在
+    `activePanelId !== null` 时整体停用、`openResource` 抛 `no session surface is mounted`），
+    宿主也没有 per-session surface 接口，所以正文改用官方 `CodeBlock` / `MarkdownText`。
+27. **官方渲染组件的 props 必须按官方形状传**：`MarkdownText` 要
+    `labels.code.{copyLabel,copiedLabel,toolbarLabels}`，`CodeBlock` 要
+    `toolbarLabels.{codeLabel,wrapLabel,unwrapLabel}`；少传就是运行期 TypeError。
 24. **导航排障默认零成本**：`?navdebug=1` 才订阅 `panelInfo`、监听焦点/可见性，并把
     `activePanelId`/实例/会话变化连调用栈累积到 `window.__SA_NAV_LOG__`。关闭时只有一次
     字符串判断——排障开关本身不能改变导航行为，也不能给「谁改了面板选择」引入新变量。
@@ -618,14 +626,15 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 宿主 goal | `test/host-goals.test.mjs` | restrict 名单、guard 拒绝/放行、pre-execute 兜底、armed 即 disarm、resume 再 disarm、dispose 释放 |
 | 文件链接 | `test/file-link.test.mjs` | 地址解析（session/absolute/盘符/UNC）、无会话才接管、普通会话放行、无接收器回退、读取请求参数 |
 | 文件预览 | `test/file-preview.test.mjs` | 注入面形状（宿主 `WorkspaceFiles`）、`read`/`readBytes` 参数与 `RemoteResult` 拆解、图片后缀→媒体类型、正文交给官方 `CodeBlock`/`MarkdownText`、行号对齐、截断与降级文案、二进制/缺组件提示 |
-| 通知点击落点 | `test/notification-nav.test.mjs` | 点击 → 面板/实例/会话三者都被请求、已在目标仍定位、状态读不到也不中止、会话→实例只信 `routers`、挂载前排队取一次即清空、`?navdebug=1` 才有订阅与 `__SA_NAV_LOG__`（关闭零副作用）、自动跟随默认关、显式 on 才跟随、开关持久化 |
+| 通知点击落点 | `test/notification-nav.test.mjs` | 点击 → 面板/实例/会话三者都被请求、已在目标仍定位、状态读不到也不中止、会话→实例只信 `routers`、挂载前排队取一次即清空、`?navdebug=1` 才有订阅与 `__SA_NAV_LOG__`（关闭零副作用）、自动跟随默认关、显式 on 才跟随、开关持久化、navdebug 来源标签（away-notify/layout/守卫） |
 | 预览抽屉 | `test/preview-drawer.test.mjs` | 抽屉样式（右侧、520/640、无 `inset`、无遮罩、z-index 在对话框之下）、文件预览走 `drawer` 变体、正文有错误边界、`Esc`/点外部关闭且解绑干净、输入框里的 `Esc` 不关、抽屉自己的下拉菜单算「里面」、错误边界接住异常并在抽屉内显示、错误摘要不塞整段栈、面板槽位整体有边界 |
 | 面板守卫 | `test/nav-guard.test.mjs` | 无手势的自动切走被拦（三条宿主路径）、有手势放行、手势一次性（点开面板不替随后的自动关闭背书）、打开本面板/面板未激活/条目消失时放行、直接写 store 时条目还在就恢复、解绑恢复原方法并移除监听、开关关闭与冻结服务不崩 |
+| 预览正文 props | `test/preview-body.test.mjs` | MarkdownText 收到 labels.code.toolbarLabels、CodeBlock 收到 toolbarLabels、行号偏移补空行、中英文词典都补齐 |
 | 面板状态 | `test/panel-state.test.mjs` | 可见即已读（+1 与清零同一判定）、离开 3 条→可见归零、心跳过期/换实例/面板关闭计未读、面板可见性=页面可见+布局选中、重挂续接原会话、事件回调不改当前选择 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 266 个用例，全部不需要模型调用。
+共 271 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录

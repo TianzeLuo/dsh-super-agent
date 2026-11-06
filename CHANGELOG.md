@@ -43,8 +43,22 @@
   复现：`node test/manual/repro-panel-yank.mjs --navdebug`；用例
   `test/nav-guard.test.mjs`。
 
+### Fixed
+
+- **预览正文 `.tex`/Markdown 抛 `Cannot read properties of undefined (reading 'code')`**：
+  宿主 `MarkdownText` 渲染代码围栏时读 `labels.code.{copyLabel,toolbarLabels}`、
+  `CodeBlock` 横幅读 `toolbarLabels.codeLabel`（对照
+  `dsh-client-ui-sidebar-documentpreview` 的 `CodeBody` 与 `dsh-client-ui-tool`
+  的 `codeToolbarLabels`）。我们只传了 `text`，现在按官方形状补 `labels` /
+  `toolbarLabels`（中英文案一并补齐）。
+- **预览从浮层改成面板内的一列**：占 560px（最宽 640px），对话区 `flex:1 1 auto;
+  min-width:0` 跟着变窄，不再盖住内容；Esc / ✕ 关闭（停靠列不再点外部关闭）。
+
 ### Changed
 
+- **导航日志加来源标签**（`source`）：`layout.panelInfo` / `layout.selectPanel` /
+  `away-notify.showSession`（附 `trigger: foreground|regain` 与可见/焦点快照）/
+  `super-agent.*`，复现「被切走」时一眼看出是谁改的。
 - **自动跟随通知默认关**（`localStorage['dsh.super-agent.navFollow']` 写 `on` 才开）。
   away-notify 在**发通知时**就写下待跳转会话（`host.js:461-465`，TTL 90 秒 `:721`），
   之后任意一次焦点/可见性恢复都会消费（`client.js:1139-1153`）——这就是「刚打开面板

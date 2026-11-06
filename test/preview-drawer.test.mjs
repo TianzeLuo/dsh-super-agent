@@ -37,24 +37,28 @@ function recordingReact() {
   }
 }
 
-test('抽屉是贴在右侧、有宽度上限、无遮罩的独立面板（不会铺满整屏）', () => {
+test('预览是面板里的一列（对话区让位），宽度固定、有上限、无遮罩', () => {
   const { __internals: internals } = loadClientBundle()
   const panel = internals.styles.drawerPanel
   const wide = internals.styles.drawerPanelWide
 
-  assert.equal(panel.position, 'absolute', '必须靠父级定位，不能 fixed 铺满视口')
-  assert.equal(panel.right, 0)
-  assert.equal(panel.top, 0)
-  assert.equal(panel.bottom, 0)
-  assert.equal(panel.height, undefined, '用 top/bottom 撑满高度，不再写死 height')
+  // 停靠列：flex 子项，不再 position:absolute 浮在对话上（那会盖住内容且对话区不缩宽）。
+  assert.equal(panel.position, undefined, '停靠列不靠 absolute 覆盖对话区')
   assert.equal(Object.prototype.hasOwnProperty.call(panel, 'inset'), false, '不能出现 inset: 0')
+  assert.match(panel.flex, /0 0 auto/, '固定宽度、不参与伸缩')
   assert.ok(panel.width >= 480 && panel.width <= 640, `宽度应在 480–640：${panel.width}`)
   assert.ok(wide.width >= 480 && wide.width <= 640, `宽版宽度应在 480–640：${wide.width}`)
-  assert.ok(panel.zIndex > 0 && panel.zIndex < 1000, 'z-index 要在内容之上、宿主对话框之下')
+  assert.match(String(panel.maxWidth), /%/, '窄窗口下按比例收，不盖满整屏')
+  assert.equal(panel.minHeight, 0)
   assert.match(panel.background, /var\(--dsw-alias-bg-layer-1/, '背景跟随宿主主题')
   assert.equal(panel.pointerEvents, undefined, '不能整体禁掉指针事件')
 
-  // 正文独立滚动，抽屉本身不裁掉内容。
+  // 对话区让位：flex 1 1 auto + minWidth 0，才能跟着变窄而不是被挤出去。
+  const area = internals.styles.conversationArea
+  assert.match(area.flex, /1 1 auto/)
+  assert.equal(area.minWidth, 0)
+
+  // 正文独立滚动，列本身不裁掉内容。
   assert.equal(internals.styles.drawerBody.overflowY, 'auto')
   assert.equal(internals.styles.drawerBody.minHeight, 0)
 })
