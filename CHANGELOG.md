@@ -45,3 +45,21 @@
   （`{ ok, value }` / `{ ok: false, error }`）——之前即使拿到接口也会把包络当成正文。
   接口缺席仍然只显示降级提示，不崩溃。`package.json` 的 `dsh.client.inject` 不需要改：
   那一层是模块到达顺序，服务可用性由 `ctx.inject` 负责。
+
+- **未读不清零 / 切回面板被重置 / 打字时被切走**。三处都出在「当前选择」被
+  多处各自维护：
+  - 未读的 +1 与清零原本是两套条件（`turn/end` 里跳过 +1，但没人负责清零），
+    于是人就在面板里也会越攒越多、点消息区也不会清。现在合并进
+    `lib/attendance.js` 的 `replyEffect`：面板可见时回复即已读**并清零**，
+    不可见才 +1；浏览器半部的 `visible`/`read` 也改用同一个 `panelVisibleNow()`
+    （页面可见 + `layout.panelInfo.activePanelId` 是本面板），心跳与窗口
+    `focus`/`pageshow` 都会补一次上报，`document.visibilityState` 失焦再回来
+    的残留也随之清掉。
+  - 面板的 `sessionId` 只是组件 state，一重挂（切面板 / HMR / 布局重排）就归零，
+    先闪「新会话」落地页再等 `ensure`；现在用内存级续接值先渲染同一条 Router，
+    并在挂载时先读 `/ui/state` **沿用宿主活着的 Router**（只有确实没有才
+    `ensure` 新建），因此重挂不再落到空面板、也不会多建会话。
+  - 所有会话写入收敛到 `sessionTransition`：只有用户动作（切实例 / Reset / 重试）
+    与挂载时的宿主快照能改，轮询、未读、徽标、worker 报告等事件回调一律不改，
+    避免输入过程中被切走。
+  未读仍只存内存，不持久化。

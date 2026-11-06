@@ -569,6 +569,19 @@ test('multiple instances share one anchor workspace while keeping homes and unre
   sys.emit('session/event', turn, { type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } } })
   const background = await (await sys.routes.get('/api/super-agent/ui/state').fetch(new Request('http://127.0.0.1/api/super-agent/ui/state'))).json()
   assert.equal(background.unreadTotal, 1)
+
+  // 面板重新可见但还没清（read:false 的上报本身不清零）：
+  const reseen = await (await sys.routes.get('/api/super-agent/ui/instances/active').fetch(new Request('http://127.0.0.1/api/super-agent/ui/instances/active', {
+    method: 'POST',
+    body: JSON.stringify({ instance_id: 'default', panel: true, visible: true, read: false }),
+  }))).json()
+  assert.equal(reseen.unreadTotal, 1)
+
+  // 看着面板时又来一条回复：既不 +1，也把之前残留的 1 清掉（同一个判定）。
+  sys.emit('session/event', turn, { type: 'assistant/message', data: { turn: 4, message: { content: [{ type: 'text', text: '回到面板' }] } } })
+  sys.emit('session/event', turn, { type: 'turn/end', data: { turn: 4, reason: { kind: 'completed' } } })
+  const cleared = await (await sys.routes.get('/api/super-agent/ui/state').fetch(new Request('http://127.0.0.1/api/super-agent/ui/state'))).json()
+  assert.equal(cleared.unreadTotal, 0)
   sys.emit('agent/disposed', { agent: sys.agents.get(first.sessionId) })
   sys.emit('agent/disposed', { agent: sys.agents.get(second.sessionId) })
 })

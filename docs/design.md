@@ -557,10 +557,11 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 目标 | `test/objectives.test.mjs` | 创建不唤醒、cadence→schedule、Worker 报告推进、到点检查推进、关闭取消调度、节奏替换、宿主 goal 迁移、journal 回放 |
 | 宿主 goal | `test/host-goals.test.mjs` | restrict 名单、guard 拒绝/放行、pre-execute 兜底、armed 即 disarm、resume 再 disarm、dispose 释放 |
 | 文件链接 | `test/file-link.test.mjs` | 地址解析（session/absolute/盘符/UNC）、无会话才接管、普通会话放行、无接收器回退、读取请求参数 |
+| 面板状态 | `test/panel-state.test.mjs` | 可见即已读（+1 与清零同一判定）、离开 3 条→可见归零、心跳过期/换实例/面板关闭计未读、面板可见性=页面可见+布局选中、重挂续接原会话、事件回调不改当前选择 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 202 个用例，全部不需要模型调用。
+共 223 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
