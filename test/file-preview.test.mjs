@@ -307,6 +307,10 @@ test('the drawer picks the official body per file type', () => {
   assert.equal(previewKindOf(undefined, 'src/app.ts'), 'code')
   // 登记表里没有的图片后缀不当图片，避免 Blob 类型错。
   assert.equal(previewKindOf(() => 'image', 'a.unknownimg'), 'code')
+  // CSV/TSV 官方归到表格类，但字节是文本：按代码正文读，不冒充二进制。
+  assert.equal(previewKindOf(() => 'excel', 'data/rows.csv'), 'code')
+  assert.equal(previewKindOf(() => 'excel', 'data/rows.TSV'), 'code')
+  assert.equal(previewKindOf(() => 'excel', 'data/sheet.xlsx'), 'binary')
 })
 
 test('image suffixes map onto Blob media types', () => {
