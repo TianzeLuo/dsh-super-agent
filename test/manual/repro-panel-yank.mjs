@@ -101,11 +101,16 @@ async function replay({ guard }) {
     removeEventListener: () => {},
     fire: (type) => { for (const fn of listeners.get(type) ?? []) fn({ type }) },
   }
+  // 假时钟：真实里两次点击不会落在同一毫秒；同一次点击的多个事件才会。
+  let clock = 1_000_000
+  const tick = (ms) => { clock += ms }
+  const gesture = (type = 'pointerdown') => { tick(400); doc.fire(type) }
   let disableGuard = () => {}
   if (guard) {
     disableGuard = internals.installNavGuard({}, {
       layout,
       document: doc,
+      now: () => clock,
       storage: { getItem: () => null },
       isRegistered: () => true,
     })
@@ -117,28 +122,29 @@ async function replay({ guard }) {
   }
 
   // 1. 用户点左栏入口（真实手势）→ 打开面板
-  doc.fire('pointerdown')
+  gesture()
   layout.selectPanel(PANEL_ID)
   record('用户点击入口 → 打开面板')
 
   // 2. 2 秒内的自动事件（每条之间让事件循环走一圈，恢复逻辑才有机会跑）
   for (const scenario of scenarios(store, layout, [PANEL_ID])) {
+    tick(300)
     scenario.run()
     await new Promise((resolve) => setTimeout(resolve, 10))
     record(`自动：${scenario.name}`)
     if (store.state.panelInfo.activePanelId !== PANEL_ID) {
       // 只有没被挡住时才需要用户重新打开
-      doc.fire('pointerdown')
+      gesture()
       layout.selectPanel(PANEL_ID)
       record('（用户不得不重新打开面板）')
     }
   }
 
-  // 3. 合法导航：用户重新打开面板后点左栏会话（有手势）
-  doc.fire('pointerdown')
+  // 3. 合法导航：用户重新打开面板，再点左栏会话 / Conversation（有手势）
+  gesture()
   layout.selectPanel(PANEL_ID)
   record('用户重新打开面板')
-  doc.fire('pointerdown')
+  gesture()
   layout.selectPanel(null)
   record('用户点会话（合法导航）')
 
