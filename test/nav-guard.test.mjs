@@ -28,6 +28,7 @@ function fakeLayout(initial) {
 function fakeDocument() {
   const listeners = new Map()
   return {
+    hidden: false,
     listeners,
     addEventListener(type, fn) {
       if (!listeners.has(type)) listeners.set(type, [])
@@ -190,7 +191,7 @@ test('解绑后恢复原方法、移除监听；关掉开关就完全不改宿�
     isRegistered: () => true,
   })
   assert.notEqual(layout.selectPanel, original)
-  assert.equal(doc.count(), 5, '五个手势监听')
+  assert.equal(doc.count(), 6, '五个手势监听 + 一个 visibilitychange（通知点击放行令牌）')
   guard()
   assert.equal(layout.selectPanel, original, '解绑后恢复')
   assert.equal(doc.count(), 0, '解绑后不留监听')
@@ -274,7 +275,7 @@ test('同一个 layout 只包一层（ctx.inject 重复回调也不会叠包装�
   const original = layout.selectPanel
   const first = internals.installNavGuard({}, { layout, document: doc, now: () => 1_000, storage: { getItem: () => null }, isRegistered: () => true })
   const second = internals.installNavGuard({}, { layout, document: doc, now: () => 1_000, storage: { getItem: () => null }, isRegistered: () => true })
-  assert.equal(doc.count(), 5, '第二层不再挂监听')
+  assert.equal(doc.count(), 6, '第二层不再挂监听')
   assert.equal(layout.selectPanel(null), false, '只有一层照样拦')
   second()
   assert.equal(layout.selectPanel(null), false, '一次解绑不会把守卫拆掉')
@@ -490,5 +491,138 @@ test('我们自己的用户意图导航（await 过、手势已过期）可以�
   internals.authorizeNavigation()
   workspace.openSession('worker-1')
   assert.deepEqual(workspace.opened, ['worker-1'], '显式授权后放行（「在会话中打开」）')
+  guard()
+})
+
+/**
+ * 通知点击的两种入口：
+ *   ① 页面内 toast —— 有 pointerdown，走手势窗口；
+ *   ② 系统通知   —— 由宿主用 OS 通知弹出，点击是 `dshnotify:` 协议把窗口置前
+ *      （dsh-away-notify/lib/protocol.js），页面里**收不到任何指针事件**，唯一信号是
+ *      文档从 hidden 回到 visible。
+ */
+test('点系统通知（hidden → visible）后到达的 pendingFocus 跳一次', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  let clock = 10_000
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => clock,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+
+  doc.hidden = true
+  doc.fire('visibilitychange')
+  clock += 3_000
+  doc.hidden = false
+  doc.fire('visibilitychange')
+  workspace.openSession('s-2')
+  assert.deepEqual(workspace.opened, ['s-2'], '点通知回来：放行一次')
+
+  // 令牌只用一次：紧接着的自动跳转继续拦。
+  workspace.openSession('s-3')
+  assert.deepEqual(workspace.opened, ['s-2'], '一次性令牌')
+  guard()
+})
+
+test('Alt-Tab（窗口一直 visible，只有 focus）不跳；离开太久回来也不跳', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  let clock = 20_000
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => clock,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+
+  // 同一桌面 Alt-Tab：文档始终 visible，只有 window focus。
+  workspace.openSession('s-2')
+  assert.deepEqual(workspace.opened, [], 'Alt-Tab 不跳')
+
+  // 离开很久（> 20s）再回来：典型 Alt-Tab 而不是「刚弹通知就点」。
+  doc.hidden = true
+  doc.fire('visibilitychange')
+  clock += 60_000
+  doc.hidden = false
+  doc.fire('visibilitychange')
+  workspace.openSession('s-3')
+  assert.deepEqual(workspace.opened, [], '离开太久不跳')
+  guard()
+})
+
+test('页面内 toast 点击（pointerdown）照常跳', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 30_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+  doc.fire('pointerdown')
+  workspace.openSession('s-2')
+  assert.deepEqual(workspace.opened, ['s-2'], '页面内点 toast：跳')
+  guard()
+})
+
+test('侧栏点会话 / 快捷键（手势）照常跳', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 40_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+  doc.fire('keydown')
+  workspace.openSession('s-2')
+  assert.deepEqual(workspace.opened, ['s-2'], '快捷键：跳')
+  guard()
+})
+
+test('通知以新标签页打开（?dshAwayNotifyFocus=）时也放行一次', () => {
+  const bundle = loadClientBundle({}, { location: { search: '?dshAwayNotifyFocus=s-9' } })
+  const { __internals: internals } = bundle
+  const layout = fakeLayout(null)
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 50_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+  workspace.openSession('s-9')
+  assert.deepEqual(workspace.opened, ['s-9'], 'URL 参数带来的那次跳转放行')
   guard()
 })

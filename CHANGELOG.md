@@ -16,6 +16,12 @@
 
 ### Fixed
 
+- **点通知不再跳转（守卫误拦的回归）**：系统通知由 OS 弹出、点击走 `dshnotify:`
+  协议置前窗口，页面里没有指针事件，被「无手势跨会话拦截」挡掉了。现在补三条精确
+  放行信号：页面内 toast 手势、`?dshAwayNotifyFocus=` URL 参数、以及「文档 hidden →
+  visible 且离开 0.4–20 秒」的一次性令牌（点系统通知的唯一页面内信号）。同一桌面
+  Alt-Tab（只有 focus）与离开超 20 秒仍拦。
+
 - **刷新后仍被切到另一个已有会话**：away-notify 的 pendingFocus 走
   `uiWorkspace.openSession → replaceMain`，绕过 `selectPanel` 守卫，会话在
   `replaceMain` 里就换掉了。现在守卫同时包一层会话打开器（`uiWorkspace.openSession`
