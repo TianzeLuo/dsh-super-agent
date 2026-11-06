@@ -37,16 +37,16 @@ function recordingReact() {
   }
 }
 
-test('预览是面板里的一列（对话区让位），宽度固定、有上限、无遮罩', () => {
+test('预览是面板里的一列（对话区让位），宽度可调、有上限、无遮罩', () => {
   const { __internals: internals } = loadClientBundle()
   const panel = internals.styles.drawerPanel
   const wide = internals.styles.drawerPanelWide
 
   // 停靠列：flex 子项，不再 position:absolute 浮在对话上（那会盖住内容且对话区不缩宽）。
-  assert.equal(panel.position, undefined, '停靠列不靠 absolute 覆盖对话区')
+  assert.equal(panel.position, 'relative', '列本身是定位上下文（拖拽条挂在左缘）')
   assert.equal(Object.prototype.hasOwnProperty.call(panel, 'inset'), false, '不能出现 inset: 0')
   assert.match(panel.flex, /0 0 auto/, '固定宽度、不参与伸缩')
-  assert.ok(panel.width >= 480 && panel.width <= 640, `宽度应在 480–640：${panel.width}`)
+  assert.ok(panel.width >= 360 && panel.width <= 640, `默认宽度应在 360–640：${panel.width}`)
   assert.ok(wide.width >= 480 && wide.width <= 640, `宽版宽度应在 480–640：${wide.width}`)
   assert.match(String(panel.maxWidth), /%/, '窄窗口下按比例收，不盖满整屏')
   assert.equal(panel.minHeight, 0)
@@ -61,27 +61,60 @@ test('预览是面板里的一列（对话区让位），宽度固定、有上�
   // 正文独立滚动，列本身不裁掉内容。
   assert.equal(internals.styles.drawerBody.overflowY, 'auto')
   assert.equal(internals.styles.drawerBody.minHeight, 0)
+
+  // 标签栏可横向滚动、每个标签自己滚、拖拽条有独立命中区。
+  assert.equal(internals.styles.previewTabScroll.overflowX, 'auto')
+  assert.equal(internals.styles.previewTabScroll.overflowY, 'hidden')
+  assert.equal(internals.styles.previewPane.overflowY, 'auto')
+  assert.match(String(internals.styles.previewResizer.cursor), /col-resize/)
+  assert.equal(internals.styles.previewResizer.position, 'absolute')
 })
 
-test('文件预览请求的是右侧抽屉变体，而不是居中弹层', () => {
+test('预览列复用 Drawer 的 drawer 变体，头部是标签栏、每个标签一份正文', () => {
   const React = recordingReact()
   const { __internals: internals } = loadClientBundle({ react: React })
-  const tree = internals.FilePreview({
+  const tabs = [
+    { id: 'src/app.ts', plan: { path: 'src/app.ts' } },
+    { id: 'docs/readme.md', plan: { path: 'docs/readme.md' } },
+  ]
+  const tree = internals.PreviewColumn({
     t: (key) => key,
-    plan: { path: 'src/app.ts', kind: 'file' },
+    tabs,
+    activeId: 'docs/readme.md',
+    width: 640,
     sessionId: 's-1',
     pluginCtx: {},
+    onActivate: () => {},
+    onCloseTab: () => {},
     onClose: () => {},
+    onResize: () => {},
   })
 
   assert.equal(tree.type, internals.Drawer, '外壳仍是共享的 Drawer，不另造一套')
   assert.equal(tree.props.variant, 'drawer')
-  assert.equal(tree.props.wide, true)
+  assert.equal(tree.props.width, 640, '列宽由面板宽度/拖拽值决定')
+  assert.equal(tree.props.bodyStyle.overflow, 'hidden', '正文滚动交给各标签自己的 pane')
+  assert.ok(tree.props.resizer, '左缘有拖拽条')
 
-  // 正文包在错误边界里：官方渲染器崩了只坏这一块。
-  const body = tree.children.find((child) => child !== null && child !== undefined && child.type === internals.RenderBoundary)
-  assert.ok(body, '抽屉正文必须有错误边界')
-  assert.equal(typeof body.props.fallback, 'function')
+  const header = tree.props.header
+  assert.equal(header.type, 'div')
+  const tablist = header.children[0]
+  assert.equal(tablist.props.role, 'tablist')
+  const tabEls = tablist.children.flat()
+  assert.equal(tabEls.length, 2)
+  assert.equal(tabEls[0].props['aria-selected'], false)
+  assert.equal(tabEls[1].props['aria-selected'], true, '活动标签高亮')
+  assert.equal(tabEls[0].props.style.background, 'transparent', '非活动标签不高亮')
+  // 每个标签都有 ✕。
+  for (const tab of tabEls) {
+    const close = tab.children.find((child) => child !== null && child !== undefined && child.type === 'button')
+    assert.ok(close, '每个标签都要有 ✕')
+  }
+
+  const panes = tree.children.flat().filter((child) => child !== null && child !== undefined && child.type === internals.PreviewTabBody)
+  assert.equal(panes.length, 2, '一个标签一份常驻正文（切换不重新读取）')
+  assert.equal(panes[0].props.hidden, true)
+  assert.equal(panes[1].props.hidden, false)
 })
 
 test('Esc 与点抽屉外关闭；点抽屉里不关；解绑后不再响应', () => {
@@ -118,6 +151,28 @@ test('Esc 与点抽屉外关闭；点抽屉里不关；解绑后不再响应', (
   unbind()
   assert.equal(listeners.size, 0, '解绑后不留监听')
   assert.doesNotThrow(() => loadClientBundle().__internals.bindDrawerDismiss(undefined, { isInside: () => false, onClose: () => {} }))
+})
+
+test('预览列：点外面不关（要继续加标签），Esc 交给自定义行为', () => {
+  const listeners = new Map()
+  const target = {
+    addEventListener: (type, fn) => listeners.set(type, fn),
+    removeEventListener: (type) => listeners.delete(type),
+  }
+  let closed = 0
+  let escaped = 0
+  loadClientBundle().__internals.bindDrawerDismiss(target, {
+    isInside: () => false,
+    onClose: () => { closed += 1 },
+    onEscape: () => { escaped += 1 },
+    dismissOnOutside: false,
+  })
+
+  listeners.get('mousedown')({ target: 'outside' })
+  assert.equal(closed, 0, '点会话里的另一个文件链接不能先把整列关掉')
+  listeners.get('keydown')({ key: 'Escape' })
+  assert.equal(escaped, 1, 'Esc 由预览列处理（关当前标签）')
+  assert.equal(closed, 0)
 })
 
 test('抽屉里弹出的下拉菜单算「里面」，点它不会顺带关掉抽屉', () => {

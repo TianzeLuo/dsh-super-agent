@@ -30,7 +30,7 @@
 | 组件 | 文件 | 职责 | 不做什么 |
 | --- | --- | --- | --- |
 | 插件入口 | `lib/index.js` | 项目开关、Router 认领、注册工具/提示词/HTTP/UI、租约、跨项目 Session Worker | 不做调度 |
-| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话、右侧活动栏与任务详情、模型/规则/定时任务抽屉、官方渲染的文件预览抽屉、通知点击的实例/会话定位与 `?navdebug=1` 导航诊断、二次确认重置、Worker/旧 Router 展示层隐藏；无项目选择器 | 不定义消息协议，不选项目 |
+| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话、右侧活动栏与任务详情、模型/规则/定时任务抽屉、官方渲染的多标签文件预览列（打开时让出活动栏）、通知点击的实例/会话定位与 `?navdebug=1` 导航诊断、二次确认重置、Worker/旧 Router 展示层隐藏；无项目选择器 | 不定义消息协议，不选项目 |
 | Runtime | `lib/runtime.js` | 批处理、直通、Worker 生命周期、报告、Watchdog、恢复、inbox | 不调模型 |
 | Store | `lib/store.js` | journal 追加、重放、内存索引 | 不做策略 |
 | Filter | `lib/filter.js` | 程序层快路径 | 不调模型 |
@@ -639,7 +639,8 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 文件链接 | `test/file-link.test.mjs` | 地址解析（session/absolute/盘符/UNC）、无会话才接管、普通会话放行、无接收器回退、读取请求参数 |
 | 文件预览 | `test/file-preview.test.mjs` | 注入面形状（宿主 `WorkspaceFiles`）、`read`/`readBytes` 参数与 `RemoteResult` 拆解、图片后缀→媒体类型、正文交给官方 `CodeBlock`/`MarkdownText`、行号对齐、截断与降级文案、二进制/缺组件提示 |
 | 通知点击落点 | `test/notification-nav.test.mjs` | 点击 → 面板/实例/会话三者都被请求、已在目标仍定位、状态读不到也不中止、会话→实例只信 `routers`、挂载前排队取一次即清空、`?navdebug=1` 才有订阅与 `__SA_NAV_LOG__`（关闭零副作用）、自动跟随默认关、显式 on 才跟随、开关持久化、navdebug 来源标签（away-notify/layout/守卫） |
-| 预览抽屉 | `test/preview-drawer.test.mjs` | 抽屉样式（右侧、520/640、无 `inset`、无遮罩、z-index 在对话框之下）、文件预览走 `drawer` 变体、正文有错误边界、`Esc`/点外部关闭且解绑干净、输入框里的 `Esc` 不关、抽屉自己的下拉菜单算「里面」、错误边界接住异常并在抽屉内显示、错误摘要不塞整段栈、面板槽位整体有边界 |
+| 预览抽屉 | `test/preview-drawer.test.mjs` | 预览列样式（右侧、无 `inset`、无遮罩、可拖拽条、标签栏横向滚动）、`PreviewColumn` 复用 `drawer` 变体、头部标签数/高亮/每标签关闭按钮、每个标签一份常驻正文、点外面不关（加标签）、`Esc` 交给自定义行为、输入框里的 `Esc` 不关、下拉菜单算「里面」、错误边界接住异常、错误摘要不塞整段栈、面板槽位整体有边界 |
+| 预览多标签 | `test/preview-tabs.test.mjs` | 新文件追加并激活（不覆盖已有）、同文件重复点击只激活、关闭当前标签激活右邻/最后一个收起、关闭非活动标签不动当前、列宽 640/480、给对话留 320、拖拽上下限、标签名/图标映射 |
 | 面板守卫 | `test/nav-guard.test.mjs` | 无手势的自动切走被拦（三条宿主路径）、有手势放行、手势一次性（点开面板不替随后的自动关闭背书）、打开本面板/面板未激活/条目消失时放行、直接写 store 时条目还在就恢复、解绑恢复原方法并移除监听、开关关闭与冻结服务不崩 |
 | 预览正文 props | `test/preview-body.test.mjs` | MarkdownText 收到 labels.code.toolbarLabels、CodeBlock 收到 toolbarLabels、行号偏移补空行、中英文词典都补齐、真实 hw7.tex（缺失跳过）两条路径都不抛错 |
 | 单实例/重复求值 | `test/duplicate-instance.test.mjs` | 两份求值共用 window：守卫只包一层、诊断只保一份订阅、单实例标记（第二份退出）与释放、日志结构化 |
