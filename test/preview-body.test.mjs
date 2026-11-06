@@ -39,7 +39,12 @@ function primitivesStub() {
   return {
     MarkdownText: 'MarkdownText',
     CodeBlock: 'CodeBlock',
-    languageForPath: (path) => (path.endsWith('.ts') ? 'typescript' : undefined),
+    // 宿主语言表：`tex → latex`、`ts → typescript`（dsh-web-frontend 的 language 映射）。
+    languageForPath: (path) => {
+      if (path.endsWith('.ts')) return 'typescript'
+      if (path.endsWith('.tex')) return 'latex'
+      return undefined
+    },
   }
 }
 
@@ -122,4 +127,64 @@ test('中英文词典都补齐了代码块横幅与脚注文案', () => {
     const hits = source.split(`'${key}':`).length - 1
     assert.equal(hits, 2, `${key} 应同时出现在中英文词典里，实际 ${hits} 处`)
   }
+})
+
+/**
+ * 真实文件回归：用户报错现场是 `/mnt/f/code/dsa/homework/hw7.tex`（342 行 LaTeX）。
+ * 文件不在（别人 checkout）就跳过，不让用例变成环境依赖。
+ */
+const REAL_TEX = '/mnt/f/code/dsa/homework/hw7.tex'
+
+test('真实 hw7.tex：走 CodeBlock 路径，宿主读 toolbarLabels 不抛错', (t) => {
+  let text
+  try {
+    text = readFileSync(REAL_TEX, 'utf8')
+  } catch {
+    t.skip(`没有 ${REAL_TEX}`)
+    return
+  }
+  const { __internals: internals } = loadClientBundle({ react: recordingReact() })
+  // `.tex` 在宿主分类表里是 "other" → 我们按代码正文渲染（previewKindOf 的默认分支）。
+  assert.equal(internals.previewKindOf(() => 'other', 'hw7.tex'), 'code')
+  assert.equal(internals.previewKindOf(() => 'markdown', 'hw7.tex'), 'markdown')
+
+  const node = internals.previewBodyOf(primitivesStub(), (key) => key, {
+    kind: 'code',
+    state: { status: 'ready', text: text.split('\n').slice(0, 40).join('\n'), path: 'hw7.tex', offset: 1 },
+    path: 'hw7.tex',
+  })
+  const block = node.props.children
+  assert.equal(block.type, 'CodeBlock')
+  assert.match(block.props.code, /\\documentclass/, '真实内容进去了')
+  assert.equal(block.props.lang, 'latex', '语言标签要按宿主 languageForPath 走')
+
+  // 复刻宿主 CodeBlock → 横幅 的读取：`toolbarLabels.codeLabel`。
+  assert.doesNotThrow(() => {
+    const banner = { codeLabel: block.props.toolbarLabels.codeLabel, wrapLabel: block.props.toolbarLabels.wrapLabel }
+    if (banner.codeLabel.length === 0) throw new Error('empty')
+  })
+})
+
+test('真实 hw7.tex：按 Markdown 渲染（含代码围栏）也不抛错', (t) => {
+  let text
+  try {
+    text = readFileSync(REAL_TEX, 'utf8')
+  } catch {
+    t.skip(`没有 ${REAL_TEX}`)
+    return
+  }
+  const { __internals: internals } = loadClientBundle({ react: recordingReact() })
+  // 用户在 .md 里贴同一段 LaTeX 时走 MarkdownText：宿主会读 labels.code.*。
+  const markdown = ['# hw7', '', '```latex', text.split('\n').slice(0, 6).join('\n'), '```'].join('\n')
+  const node = internals.previewBodyOf(primitivesStub(), (key) => key, {
+    kind: 'markdown',
+    state: { status: 'ready', text: markdown, path: 'hw7.md', offset: 1 },
+    path: 'hw7.md',
+  })
+  const md = node.props.children
+  assert.equal(md.type, 'MarkdownText')
+  assert.doesNotThrow(() => {
+    const chrome = { copyLabel: md.props.labels.code.copyLabel, toolbarLabels: md.props.labels.code.toolbarLabels }
+    if (chrome.toolbarLabels.unwrapLabel.length === 0) throw new Error('empty')
+  })
 })
