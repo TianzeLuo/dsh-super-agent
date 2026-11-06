@@ -501,7 +501,7 @@ test('我们自己的用户意图导航（await 过、手势已过期）可以�
  *      （dsh-away-notify/lib/protocol.js），页面里**收不到任何指针事件**，唯一信号是
  *      文档从 hidden 回到 visible。
  */
-test('点系统通知（hidden → visible）后到达的 pendingFocus 跳一次', () => {
+test('切标签/最小化 1–5 秒回来：不跳（hidden→visible 不再当作点击信号）', () => {
   const { __internals: internals } = loadClientBundle()
   const layout = fakeLayout('super-agent')
   const doc = fakeDocument()
@@ -518,17 +518,16 @@ test('点系统通知（hidden → visible）后到达的 pendingFocus 跳一次
   })
   internals.takePanelReveal()
 
-  doc.hidden = true
-  doc.fire('visibilitychange')
-  clock += 3_000
-  doc.hidden = false
-  doc.fire('visibilitychange')
-  workspace.openSession('s-2')
-  assert.deepEqual(workspace.opened, ['s-2'], '点通知回来：放行一次')
-
-  // 令牌只用一次：紧接着的自动跳转继续拦。
-  workspace.openSession('s-3')
-  assert.deepEqual(workspace.opened, ['s-2'], '一次性令牌')
+  for (const away of [1_000, 3_000, 5_000]) {
+    doc.hidden = true
+    doc.fire('visibilitychange')
+    clock += away
+    doc.hidden = false
+    doc.fire('visibilitychange')
+    workspace.openSession('s-2')
+    assert.deepEqual(workspace.opened, [], `离开 ${away}ms 回来不跳`)
+    assert.equal(internals.takePanelReveal()?.sessionId, 's-2', '降级为面板内定位提示')
+  }
   guard()
 })
 
@@ -654,7 +653,125 @@ test('直接 replaceMain(…, "reveal") 的跨会话跳转也被拦（openSessio
   guard()
 })
 
-test('系统通知点回来的 replaceMain("reveal") 用一次性令牌放行一次', () => {
+test('确有通知信号（?dshAwayNotifyFocus=）时放行，且只放行那一条、只一次', () => {
+  const bundle = loadClientBundle({}, { location: { search: '?dshAwayNotifyFocus=s-2' } })
+  const { __internals: internals } = bundle
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const replaced = []
+  const workspace = { replaceMain: (target, _signal, panel) => { replaced.push([target, panel]) } }
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 70_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+
+  // 令牌绑定了 s-2：别的会话不受影响。
+  workspace.replaceMain('s-3', undefined, 'reveal')
+  assert.deepEqual(replaced, [], '令牌不适用于别的会话')
+  workspace.replaceMain('s-2', undefined, 'reveal')
+  assert.deepEqual(replaced, [['s-2', 'reveal']], '通知带来的那条：跳')
+  workspace.replaceMain('s-2', undefined, 'reveal')
+  assert.equal(replaced.length, 1, '同一条只能用一次')
+  guard()
+})
+
+test('页面内 toast 点击（pointerdown）照常跳', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 30_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+  doc.fire('pointerdown')
+  workspace.openSession('s-2')
+  assert.deepEqual(workspace.opened, ['s-2'], '页面内点 toast：跳')
+  guard()
+})
+
+test('侧栏点会话 / 快捷键（手势）照常跳', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 40_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+  doc.fire('keydown')
+  workspace.openSession('s-2')
+  assert.deepEqual(workspace.opened, ['s-2'], '快捷键：跳')
+  guard()
+})
+
+test('通知以新标签页打开（?dshAwayNotifyFocus=）时也放行一次', () => {
+  const bundle = loadClientBundle({}, { location: { search: '?dshAwayNotifyFocus=s-9' } })
+  const { __internals: internals } = bundle
+  const layout = fakeLayout(null)
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 50_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+  workspace.openSession('s-9')
+  assert.deepEqual(workspace.opened, ['s-9'], 'URL 参数带来的那次跳转放行')
+  guard()
+})
+
+test('直接 replaceMain(…, "reveal") 的跨会话跳转也被拦（openSession 之外的关闭路径）', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const replaced = []
+  const workspace = {
+    openSession: () => {},
+    replaceMain: (target, _signal, panel) => { replaced.push([target, panel]) },
+  }
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 60_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+
+  workspace.replaceMain('s-2', undefined, 'reveal')
+  assert.deepEqual(replaced, [], '无手势：拦')
+  workspace.replaceMain('s-1', undefined, 'preserve')
+  assert.deepEqual(replaced, [['s-1', 'preserve']], '启动/恢复（preserve）放行')
+  guard()
+})
+
+test('切标签回来后的 replaceMain("reveal") 同样不跳（无点击信号）', () => {
   const { __internals: internals } = loadClientBundle()
   const layout = fakeLayout('super-agent')
   const doc = fakeDocument()
@@ -678,9 +795,7 @@ test('系统通知点回来的 replaceMain("reveal") 用一次性令牌放行一
   doc.hidden = false
   doc.fire('visibilitychange')
   workspace.replaceMain('s-2', undefined, 'reveal')
-  assert.deepEqual(replaced, [['s-2', 'reveal']], '点通知：跳')
-  workspace.replaceMain('s-3', undefined, 'reveal')
-  assert.equal(replaced.length, 1, '令牌用一次')
+  assert.deepEqual(replaced, [], '没有点击信号：不跳')
   guard()
 })
 
@@ -706,5 +821,28 @@ test('守卫被外部换掉后，下一次可见性变化自愈（重新装回�
   doc.hidden = false
   doc.fire('visibilitychange')
   assert.equal(layout.selectPanel, wrapped, '自愈：装回原来的包装')
+  guard()
+})
+
+test('拦下跨会话跳转时把 Super-agent 面板切到前台（定位提示条要能看见）', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout(null)
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 90_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+
+  workspace.openSession('s-2')
+  assert.deepEqual(workspace.opened, [], '不切会话')
+  assert.deepEqual(layout.calls, ['super-agent'], '但把我们的面板切出来，让提示条可见')
+  assert.equal(internals.takePanelReveal()?.sessionId, 's-2')
   guard()
 })

@@ -81,22 +81,16 @@ TTL 90s）→ `:1003 switchTo` → `:922` 里 `resolveSessionOpener` 拿到
 `sessions.retain(..., {source:'mainView'})` + `selection.set(...)`，最后才 `selectPanel(null)`。
 所以面板守卫看到时**会话已经换掉了**。我们在守卫里同时包一层会话打开器
 （`uiWorkspace.openSession` / `sessions.open`）：没有用户手势窗口（1.5s）的跨会话跳转
-直接拦下，只排一条面板内「定位」提示（用户点一下才切）。放行「点通知」的三条精确信号：
-① 页面内 toast 点击（pointerdown/keydown 等手势，1.5s 窗口）；② 通知以新标签页打开时
-URL 上的 `?dshAwayNotifyFocus=<id>`（`dsh-away-notify/lib/host.js:426`）；③ 文档从
-hidden 回到 visible 且离开时间在 0.4–20 秒之间（系统通知点击时窗口通常在最小化/别的
-桌面，页面收不到任何指针事件，这是唯一信号），该次放行只一次。同一桌面 Alt-Tab
-（只有 window focus、文档一直 visible）和离开超过 20 秒后回来都不放行。旁路：`authorizeNavigation()`
-给「点击后 await 过」的自有导航（如在会话中打开 Worker）授权；启动/首次导航
-（还没有当前会话）与目标即当前会话都直接放行。
+直接拦下，只排一条面板内「定位」提示（用户点一下才切）。放行「点通知」的信号只有两条确定性的：① 页面内 toast 点击（pointerdown/keydown 等
+手势，1.5s 窗口）；② 通知以**新标签页**打开时 URL 上的 `?dshAwayNotifyFocus=<id>`
+（`dsh-away-notify/lib/host.js:426`），且令牌绑定该 sessionId、只用一次。
 
-**守卫不能「静默消失」**：两处加固——① 同一个 layout 只有**属主**能还原守卫，非属主
-的 `installNavGuard` 只拿到空操作（否则 HMR 卸掉旧条目时会把守卫整层拆掉，页面看着
-正常、其实没人守）；② 每次 `visibilitychange` 顺手自愈：发现 `layout.selectPanel`
-被换掉就把包装装回去（`nav.healed`）。另外已确认前端**没有** URL/路由级导航
-（bundle 里 `pushState/replaceState` 零命中），面板关闭只有两条路径：ui-workspace
-`clearMain`(:1649) 与 `replaceMain`(:1673) 里的 `selectPanel(null)`，现在 `openSession`、
-`replaceMain`、`selectPanel` 三个入口都在守卫里。
+**系统通知点击没有确定性信号，所以不自动跳**：通知由宿主用 OS 通知弹出，点击走
+`dshnotify:` 协议把窗口置前（`dsh-away-notify/lib/protocol.js`），协议脚本不回连服务器，
+presence 只有 `pending-focus`/`ack-focus`（`lib/host.js:719`/`:727`），没有「通知被点击」
+的时间戳或计数；页面里也收不到 pointerdown/click。曾经把「文档从 hidden 回到 visible」
+当信号——切标签页/最小化几秒再回来完全一样，会再次「切走」，已删除。现在被拦下的
+跳转改成：把 Super-agent 面板切到前台 + 面板内「定位」提示条，用户点一下才切。
 
 **同一页面只会跑一份**：同一个包的 client 确实可能求值两次——启动时进聚合 boot
 combo（`plugins/??…dsh-super-agent/client.js…&rev=…`），之后 `dsh-client-hmr` 每
