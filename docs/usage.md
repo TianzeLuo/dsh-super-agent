@@ -38,6 +38,13 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
   会话，旧会话隐藏后不应继续唤醒）、切换新的 dataDir generation、创建新 Router；
   旧 Worker 归档，旧 Router 会话保留但隐藏。长期约定文件不随 Reset 丢失。
 - Worker Session 不出现在侧栏，`[super-agent]` 内部 trigger 不出现在聊天流。
+- 点通知（`dsh-away-notify`）会回到产生它的**实例 + 会话**：选中面板 → 切实例 →
+  adopt 那条会话，面板顶部给一条可撤销提示。已经在那个实例/面板上也照样定位。
+  提示里「以后不自动跟随」只提示不跳转（`localStorage['dsh.super-agent.navFollow']`），
+  需要时点「定位」。
+- 排障：地址栏加 `?navdebug=1`（默认关闭）。之后每次 `activePanelId` 变化、实例/会话
+  切换都连调用栈打到 console（`[super-agent][nav]`），并累积在
+  `window.__SA_NAV_LOG__`（最多 500 条）——复现一次「被切走」就能看到调用点。
 
 默认 workspace：
 

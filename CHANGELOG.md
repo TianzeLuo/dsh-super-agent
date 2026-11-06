@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Fixed
+
+- **点通知不跳转（多实例）**：面板只把 `panelId` / retain 来源注册给
+  `dsh-away-notify`，没注册 `showSession`，所以点击最多把面板选中——面板仍停在它当时
+  显示的实例上，且 away-notify 完全没有实例概念（`layout.selectPanel` 是它唯一能做的
+  事，见 `docs/plugin-api.md`「面板点击落点」）。现在注册 `showSession`，点击后依次：
+  `selectPanel` → 用 `/ui/state` 的 `routers` 把会话映射到实例 → 切实例
+  （`/ui/instances/active` + ensure）并 adopt 该会话。**已在目标实例/面板上也照样执行
+  定位**，不再有「状态没变就早退」的空操作；面板顶部给一条可撤销提示（「返回」回到原
+  实例+会话）。切换实例失败时只提示、不改当前会话；认不出的会话不 adopt（避免落到空
+  会话），改为提示。请求在面板挂载前排队（away-notify 是 `selectPanel` 之后同步回调），
+  挂载后消费；`showSession` 的落点与挂载快照的竞态用 5 秒保护窗避免互相覆盖。
+
+### Added
+
+- **导航诊断开关** `?navdebug=1`（默认关闭）：`activePanelId` 变化、实例切换、会话切换
+  连同调用栈写进 console（`[super-agent][nav]`）并累积到 `window.__SA_NAV_LOG__`
+  （500 条上限）。关闭时只有一次字符串判断，不订阅服务、不在 window 上留东西。
+- **通知自动跟随开关**：提示里的「以后不自动跟随」把
+  `localStorage['dsh.super-agent.navFollow']` 设为 `off`，之后点击通知只提示、由用户点
+  「定位」再跳。这是面板侧对 `dsh-away-notify`「回到前台就跳会话」的抑制（它的待跳转
+  会话在**发通知**时写入 `lib/host.js:463-464`，客户端在任意焦点/可见性恢复时消费
+  `lib/client.js:1139-1141`，TTL 90 秒 `lib/host.js:136`），不需要全局关掉
+  `openOnClick`（那会把点击完全变成不可用，而且会让「点通知回 dsh」这条唯一通路失效）。
+
 ### Changed
 
 - **文件预览改用官方渲染器**（替代上一轮的自绘抽屉）。官方右侧栏预览在插件面板里

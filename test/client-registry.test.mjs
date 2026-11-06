@@ -106,6 +106,19 @@ function makePanels() {
   }
 }
 
+/**
+ * 注册参数断言：来源声明 + 「点击通知回面板要定位到会话」的回调。
+ *
+ * `showSession` 是 away-notify 文档里唯一能声明「切到某条会话」的通路（见其
+ * docs/plugin-api.md「面板点击落点」）；缺了它，多实例下点击只能选中面板，
+ * 面板仍停在上一个实例——用户看到的「点了没反应」。
+ */
+function assertRegistration(entry, { panelId, sources }) {
+  assert.equal(entry.panelId, panelId)
+  assert.deepEqual(entry.sources, sources)
+  assert.equal(typeof entry.showSession, 'function', '必须注册 showSession，否则点击无法定位会话/实例')
+}
+
 test('client bundle exports the expected loader id and static inject list', () => {
   const { registration, exports } = loadClient()
   assert.equal(registration.id, 'dsh-super-agent')
@@ -121,7 +134,7 @@ test('apply 把面板 id 与 retain 来源显式注册给 awayNotifyPanels（替
 
   assert.doesNotThrow(() => exports.apply(ctx))
   assert.equal(panels.calls.length, 1, '注册一次，且只注册一次')
-  assert.deepEqual(panels.calls[0], { panelId: 'super-agent', sources: ['superAgentUi'] })
+  assertRegistration(panels.calls[0], { panelId: 'super-agent', sources: ['superAgentUi'] })
   ctx.dispose()
 })
 
@@ -134,7 +147,7 @@ test('面板卸载（插件卸载/热重载）时调用注册返回的注销函�
   assert.deepEqual(panels.released, [], '挂载期间不应注销')
   ctx.dispose()
   assert.equal(panels.released.length, 1, '卸载时必须注销')
-  assert.deepEqual(panels.released[0], { panelId: 'super-agent', sources: ['superAgentUi'] })
+  assertRegistration(panels.released[0], { panelId: 'super-agent', sources: ['superAgentUi'] })
 })
 
 test('重复 apply（重新挂载）各自注册、各自注销，不累积', () => {
@@ -172,7 +185,7 @@ test('服务晚到：away-notify 后加载时补注册（auto 学习不需要再
 
   ctx.ready('awayNotifyPanels', panels.service)
   assert.equal(panels.calls.length, 1, '服务出现后必须补注册')
-  assert.deepEqual(panels.calls[0], { panelId: 'super-agent', sources: ['superAgentUi'] })
+  assertRegistration(panels.calls[0], { panelId: 'super-agent', sources: ['superAgentUi'] })
   ctx.dispose()
   assert.equal(panels.released.length, 1)
 })

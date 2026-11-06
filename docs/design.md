@@ -30,7 +30,7 @@
 | 组件 | 文件 | 职责 | 不做什么 |
 | --- | --- | --- | --- |
 | 插件入口 | `lib/index.js` | 项目开关、Router 认领、注册工具/提示词/HTTP/UI、租约、跨项目 Session Worker | 不做调度 |
-| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话、右侧活动栏与任务详情、模型/规则/定时任务抽屉、官方渲染的文件预览抽屉、二次确认重置、Worker/旧 Router 展示层隐藏；无项目选择器 | 不定义消息协议，不选项目 |
+| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话、右侧活动栏与任务详情、模型/规则/定时任务抽屉、官方渲染的文件预览抽屉、通知点击的实例/会话定位与 `?navdebug=1` 导航诊断、二次确认重置、Worker/旧 Router 展示层隐藏；无项目选择器 | 不定义消息协议，不选项目 |
 | Runtime | `lib/runtime.js` | 批处理、直通、Worker 生命周期、报告、Watchdog、恢复、inbox | 不调模型 |
 | Store | `lib/store.js` | journal 追加、重放、内存索引 | 不做策略 |
 | Filter | `lib/filter.js` | 程序层快路径 | 不调模型 |
@@ -132,6 +132,19 @@
     object URL），读取只走公开的 `remote.workspaceFiles`。PDF/Office/视频面板没有
     渲染器，给明确提示而不是读成文本；宿主缺 primitives 时同样提示。普通会话里
     文件链接仍走官方右侧栏预览，行为不变。
+22. **点通知必须定位到「实例 + 会话」，不能只选面板**：面板把 `panelId`、retain 来源
+    与 `showSession` 一起注册给 `dsh-away-notify`。`showSession` 固定三步：`selectPanel`
+    → 用 `/ui/state` 的 `routers` 把会话映射到实例 → 切实例（`/ui/instances/active` +
+    ensure）并 adopt 会话；**没有「已经在了就早退」**，否则多实例下就是「点了没反应」
+    （away-notify 只认会话，不认实例）。它在 `selectPanel` 之后**同步**回调，面板可能还
+    没挂载，所以请求先排队、挂载后消费；挂载快照（bootstrap）与通知点击都是异步的，
+    后者用 5 秒保护窗压住前者，避免互相覆盖。认不出的会话不 adopt（那会落到空会话），
+    改为提示；切换实例失败只提示、不动当前会话。
+23. **导航排障默认零成本**：`?navdebug=1` 才订阅 `panelInfo`、监听焦点/可见性，并把
+    `activePanelId`/实例/会话变化连调用栈累积到 `window.__SA_NAV_LOG__`。关闭时只有一次
+    字符串判断——排障开关本身不能改变导航行为，也不能给「谁改了面板选择」引入新变量。
+    自动跟随可关（`localStorage['dsh.super-agent.navFollow']`）：这是面板侧对 away-notify
+    「回到前台就跳会话」的抑制，比全局关 `openOnClick` 精准（后者连点击一起废掉）。
 
 ## 4. 事件 intake 算法
 
@@ -504,6 +517,8 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | journal 有坏行 | 崩溃/手工编辑 | `status` 的 `journalBadLines` |
 | 文件预览提示「没有提供文件读取接口」 | `remote.workspaceFiles` 缺席（api-gateway 没装/还没就绪） | 浏览器控制台的 `ctx.inject(['remote.workspaceFiles'])`；预览抽屉有重试按钮 |
 | 文件预览提示「没有提供官方预览组件」 | 宿主版本太旧，没有 `@deepseek-ai/dsh-client-ui-primitives` seed | 浏览器控制台的 `require` 结果；升级宿主 |
+| 点通知不跳转 / 跳错实例 | 没注册 `showSession`；或 `/ui/state` 里没有该会话的 Router（已关闭/归档） | 地址栏 `?navdebug=1` 后看 `__SA_NAV_LOG__` 的 `reveal.*`；提示条会写明「认不出实例」 |
+| 回到窗口时被切到别的会话 | away-notify 的待跳转会话在发通知时就写入、任意焦点恢复时消费（90 秒有效） | `__SA_NAV_LOG__` 里 `panel` 事件的调用栈；不需要时在提示条点「以后不自动跟随」 |
 
 ## 14. 扩展点
 
@@ -582,11 +597,12 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 宿主 goal | `test/host-goals.test.mjs` | restrict 名单、guard 拒绝/放行、pre-execute 兜底、armed 即 disarm、resume 再 disarm、dispose 释放 |
 | 文件链接 | `test/file-link.test.mjs` | 地址解析（session/absolute/盘符/UNC）、无会话才接管、普通会话放行、无接收器回退、读取请求参数 |
 | 文件预览 | `test/file-preview.test.mjs` | 注入面形状（宿主 `WorkspaceFiles`）、`read`/`readBytes` 参数与 `RemoteResult` 拆解、图片后缀→媒体类型、正文交给官方 `CodeBlock`/`MarkdownText`、行号对齐、截断与降级文案、二进制/缺组件提示 |
+| 通知点击落点 | `test/notification-nav.test.mjs` | 点击 → 面板/实例/会话三者都被请求、已在目标仍定位、状态读不到也不中止、会话→实例只信 `routers`、挂载前排队取一次即清空、`?navdebug=1` 才有订阅与 `__SA_NAV_LOG__`（关闭零副作用）、自动跟随开关持久化 |
 | 面板状态 | `test/panel-state.test.mjs` | 可见即已读（+1 与清零同一判定）、离开 3 条→可见归零、心跳过期/换实例/面板关闭计未读、面板可见性=页面可见+布局选中、重挂续接原会话、事件回调不改当前选择 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 237 个用例，全部不需要模型调用。
+共 246 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录

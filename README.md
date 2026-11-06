@@ -56,6 +56,19 @@ dataDir、模型/规则/定时任务和未读计数；切换实例不会串数�
 「`document.visibilityState` 可见 + `layout.panelInfo.activePanelId` 是本面板」
 上报，和清零共用这一个定义。
 
+点通知回到产生它的实例：面板把 `panelId` / retain 来源 / `showSession` 一起注册给
+`dsh-away-notify`（见它的 `docs/plugin-api.md`「面板点击落点」）。点击后先选中面板，
+再用 `/ui/state` 的 `routers` 把会话映射到实例，然后切实例（`/ui/instances/active` +
+ensure）并 adopt 那条会话；面板顶部给一条可撤销的提示（「返回」回到你原来看的实例与
+会话）。**已经在目标实例/面板上也照样定位**，不会变成空操作。三处可关：
+提示里的「以后不自动跟随」只提示不跳转（`localStorage['dsh.super-agent.navFollow']`），
+需要时点「定位」。
+
+排障：地址栏加 `?navdebug=1` 打开导航诊断（默认关闭）。之后每次 `activePanelId`
+变化、实例/会话切换都连同**调用栈**打到 console（前缀 `[super-agent][nav]`），并累积在
+`window.__SA_NAV_LOG__`（最多 500 条，整段复制即可）。复现一次「被切走」就能看到是谁
+改的（`dsh-away-notify` 的 focus 回跳、面板自己的 ensure/挂载快照都在栈里）。
+
 ## 使用
 
 - 直接输入任务；Router 根据描述和 `superagent_projects` 选择目标项目。
