@@ -72,6 +72,19 @@ hashchange），而且手势是**一次性令牌**——点开面板那一下不
 复现脚本（不启动 dsh，用宿主三条路径的真实语义回放，对比装守卫前后）：
 `node test/manual/repro-panel-yank.mjs --navdebug`。
 
+**「被切走」的另一半：会话跳转**。away-notify 的「回到通知会话」根本不经过
+`selectPanel`，链路是：`dsh-away-notify/lib/client.js:1141`（焦点/可见性恢复）→
+`:959 consumePendingFocus`（POST presence `pending-focus`，宿主在发通知时写下 sessionId，
+TTL 90s）→ `:1003 switchTo` → `:922` 里 `resolveSessionOpener` 拿到
+`uiWorkspace.openSession`（或 0.1.6 的 `sessions.open`）→
+`dsh-client-ui-workspace/lib/client.js:1470 openSession` → `:1651 replaceMain` 里
+`sessions.retain(..., {source:'mainView'})` + `selection.set(...)`，最后才 `selectPanel(null)`。
+所以面板守卫看到时**会话已经换掉了**。我们在守卫里同时包一层会话打开器
+（`uiWorkspace.openSession` / `sessions.open`）：没有用户手势窗口（1.5s）的跨会话跳转
+直接拦下，只排一条面板内「定位」提示（用户点一下才切）。旁路：`authorizeNavigation()`
+给「点击后 await 过」的自有导航（如在会话中打开 Worker）授权；启动/首次导航
+（还没有当前会话）与目标即当前会话都直接放行。
+
 **同一页面只会跑一份**：宿主可能把同一个包的 client 求值两次（聚合 boot combo
 一份 + 单独的 graph row 一份，见 `dsh-client-modules` 的 `buildCombo` / `graphRow`）。
 两份各有模块闭包，模块级 WeakMap 挡不住，所以单实例约束落在 `window` 上：

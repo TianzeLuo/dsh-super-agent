@@ -282,3 +282,159 @@ test('同一个 layout 只包一层（ctx.inject 重复回调也不会叠包装�
   assert.equal(layout.selectPanel, original, '真正解绑后恢复原方法')
   assert.equal(doc.count(), 0)
 })
+
+/** 造一个「主视图 retain 着 s-1」的 sessions 服务桩。 */
+function fakeSessions(current = 's-1') {
+  const byId = {}
+  if (current !== undefined) byId[current] = { retainedBy: { mainView: 1 } }
+  return {
+    list: { getSnapshot: () => ({ byId, phase: 'ready' }) },
+  }
+}
+
+/** 造一个记录 openSession 的 uiWorkspace 桩。 */
+function fakeWorkspace() {
+  const opened = []
+  return {
+    opened,
+    openSession: (target) => { opened.push(target) },
+  }
+}
+
+test('无手势的跨会话跳转被拦下（away-notify 的 pendingFocus 走 openSession，绕过 selectPanel）', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 1_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+
+  workspace.openSession('s-2')
+  assert.deepEqual(workspace.opened, [], '没有手势：不切会话')
+  const queued = internals.takePanelReveal()
+  assert.equal(queued?.sessionId, 's-2', '降级成面板内定位提示')
+  assert.equal(queued?.reason, 'blocked-switch')
+  guard()
+  assert.equal(typeof workspace.openSession, 'function')
+})
+
+test('点通知（页面内有手势）后同一个跳转放行；手势窗口过了就恢复拦截', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  let clock = 5_000
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => clock,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+
+  doc.fire('pointerdown')
+  workspace.openSession('s-2')
+  assert.deepEqual(workspace.opened, ['s-2'], '点击引发的跳转照常')
+
+  // 手势窗口（1.5s）过后，又一个「无人点」的 pendingFocus 回来 → 拦。
+  clock += internals.NAV_GESTURE_WINDOW_MS + 500
+  workspace.openSession('s-3')
+  assert.deepEqual(workspace.opened, ['s-2'], '没有手势就拦')
+  guard()
+})
+
+test('用户主动点会话（目标就是当前会话 / 启动时没有会话）都放行', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout(null)
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 1_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions(undefined),
+    workspace,
+  })
+
+  workspace.openSession('s-1')
+  assert.deepEqual(workspace.opened, ['s-1'], '还没有当前会话（启动/launch URL）→ 放行')
+  workspace.openSession('s-1')
+  assert.deepEqual(workspace.opened, ['s-1', 's-1'], '目标就是当前会话 → 放行')
+  guard()
+})
+
+test('守卫还原时把 openSession 换回原函数（不留包装）', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const original = workspace.openSession
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 1_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  assert.notEqual(workspace.openSession, original, '装上后是包装函数')
+  guard()
+  assert.equal(workspace.openSession, original, '还原必须换回宿主原函数')
+})
+
+test('我们不在台上（面板条目已消失）时不干预会话切换', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout(null)
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 1_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => false,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  workspace.openSession('s-2')
+  assert.deepEqual(workspace.opened, ['s-2'])
+  guard()
+})
+
+test('我们自己的用户意图导航（await 过、手势已过期）可以用显式授权放行', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 1_000,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+
+  workspace.openSession('worker-1')
+  assert.deepEqual(workspace.opened, [], '没有授权时照拦')
+
+  internals.authorizeNavigation()
+  workspace.openSession('worker-1')
+  assert.deepEqual(workspace.opened, ['worker-1'], '显式授权后放行（「在会话中打开」）')
+  guard()
+})
