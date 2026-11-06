@@ -607,12 +607,12 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 文件链接 | `test/file-link.test.mjs` | 地址解析（session/absolute/盘符/UNC）、无会话才接管、普通会话放行、无接收器回退、读取请求参数 |
 | 文件预览 | `test/file-preview.test.mjs` | 注入面形状（宿主 `WorkspaceFiles`）、`read`/`readBytes` 参数与 `RemoteResult` 拆解、图片后缀→媒体类型、正文交给官方 `CodeBlock`/`MarkdownText`、行号对齐、截断与降级文案、二进制/缺组件提示 |
 | 通知点击落点 | `test/notification-nav.test.mjs` | 点击 → 面板/实例/会话三者都被请求、已在目标仍定位、状态读不到也不中止、会话→实例只信 `routers`、挂载前排队取一次即清空、`?navdebug=1` 才有订阅与 `__SA_NAV_LOG__`（关闭零副作用）、自动跟随开关持久化 |
-| 预览抽屉 | `test/preview-drawer.test.mjs` | 抽屉样式（右侧、520/640、无 `inset`、无遮罩、z-index 在对话框之下）、文件预览走 `drawer` 变体、正文有错误边界、`Esc`/点外部关闭且解绑干净、错误边界接住异常并在抽屉内显示、错误摘要不塞整段栈、面板槽位整体有边界 |
+| 预览抽屉 | `test/preview-drawer.test.mjs` | 抽屉样式（右侧、520/640、无 `inset`、无遮罩、z-index 在对话框之下）、文件预览走 `drawer` 变体、正文有错误边界、`Esc`/点外部关闭且解绑干净、输入框里的 `Esc` 不关、抽屉自己的下拉菜单算「里面」、错误边界接住异常并在抽屉内显示、错误摘要不塞整段栈、面板槽位整体有边界 |
 | 面板状态 | `test/panel-state.test.mjs` | 可见即已读（+1 与清零同一判定）、离开 3 条→可见归零、心跳过期/换实例/面板关闭计未读、面板可见性=页面可见+布局选中、重挂续接原会话、事件回调不改当前选择 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 253 个用例，全部不需要模型调用。
+共 254 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录

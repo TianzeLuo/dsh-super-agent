@@ -103,9 +103,46 @@ test('Esc 与点抽屉外关闭；点抽屉里不关；解绑后不再响应', (
   listeners.get('mousedown')({ target: 'outside' })
   assert.equal(closed, 2, '点抽屉外关闭')
 
+  // 在输入框里按 Esc 是取消输入，不是关抽屉（模型/规则抽屉里有输入框）。
+  listeners.get('keydown')({ key: 'Escape', target: { tagName: 'TEXTAREA' } })
+  assert.equal(closed, 2, '输入框里的 Esc 不关抽屉')
+  listeners.get('keydown')({ key: 'Escape', target: { tagName: 'INPUT' } })
+  assert.equal(closed, 2)
+  listeners.get('keydown')({ key: 'Escape', target: { tagName: 'DIV' } })
+  assert.equal(closed, 3, '普通元素上的 Esc 关闭')
+
   unbind()
   assert.equal(listeners.size, 0, '解绑后不留监听')
   assert.doesNotThrow(() => loadClientBundle().__internals.bindDrawerDismiss(undefined, { isInside: () => false, onClose: () => {} }))
+})
+
+test('抽屉里弹出的下拉菜单算「里面」，点它不会顺带关掉抽屉', () => {
+  const React = recordingReact()
+  const { __internals: internals } = loadClientBundle({ react: React })
+  const listeners = new Map()
+  const target = { addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: () => {} }
+  let closed = 0
+  const panelNode = { contains: (node) => node.id === 'sheet' }
+  const sheet = { id: 'sheet' }
+  const option = { id: 'opt', closest: (selector) => (selector === '[data-super-agent-popup]' ? { id: 'menu' } : null) }
+  const outside = { id: 'outside', closest: () => null }
+
+  // 直接测真实的 isInsideDrawer：抽屉里、抽屉自己的下拉里都算「里面」。
+  assert.equal(internals.isInsideDrawer(panelNode, sheet), true)
+  assert.equal(internals.isInsideDrawer(panelNode, option), true)
+  assert.equal(internals.isInsideDrawer(panelNode, outside), false)
+  assert.equal(internals.isInsideDrawer(undefined, sheet), false, '抽屉还没挂上时不误判')
+  assert.equal(internals.isInsideDrawer(panelNode, null), false)
+
+  internals.bindDrawerDismiss(target, {
+    isInside: (event) => internals.isInsideDrawer(panelNode, event?.target),
+    onClose: () => { closed += 1 },
+  })
+  listeners.get('mousedown')({ target: sheet })
+  listeners.get('mousedown')({ target: option })
+  assert.equal(closed, 0, '抽屉与它自己的下拉菜单都算里面')
+  listeners.get('mousedown')({ target: outside })
+  assert.equal(closed, 1)
 })
 
 test('错误边界接住渲染异常并显示在抽屉/面板内，界面不整页崩', () => {
