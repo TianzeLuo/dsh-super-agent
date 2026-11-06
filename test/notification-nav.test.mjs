@@ -213,7 +213,7 @@ test('navdebug 的来源标签能区分 away-notify / layout 服务 / 我们自�
   assert.match(blocked[0].stack, /navLog|guardedSelectPanel/, '仍带调用栈')
 })
 
-test('自动跟随开关：默认关，只有显式 on 才跟随（隐私模式下也按关处理）', () => {
+test('自动跟随开关：默认开，显式 off 才关闭（隐私模式下按开处理）', () => {
   const { __internals: internals } = loadClientBundle()
   const store = new Map()
   const storage = {
@@ -221,25 +221,25 @@ test('自动跟随开关：默认关，只有显式 on 才跟随（隐私模式�
     setItem: (key, value) => { store.set(key, value) },
   }
 
-  assert.equal(internals.navFollowEnabled(storage), false, '默认不跟随：焦点/可见性恢复不再自动跳')
-  assert.equal(internals.setNavFollow(true, storage), true)
-  assert.equal(internals.navFollowEnabled(storage), true, '显式打开后恢复跟随')
+  assert.equal(internals.navFollowEnabled(storage), true, '默认跟随：点通知像普通会话一样跳')
   assert.equal(internals.setNavFollow(false, storage), false)
-  assert.equal(internals.navFollowEnabled(storage), false, '关掉后持久化，刷新仍然关')
-  assert.equal(internals.navFollowEnabled({ getItem: () => 'on' }), true)
+  assert.equal(internals.navFollowEnabled(storage), false, '显式 off 后持久化，刷新仍然关')
+  assert.equal(internals.setNavFollow(true, storage), true)
+  assert.equal(internals.navFollowEnabled(storage), true, '重新打开恢复跟随')
+  assert.equal(internals.navFollowEnabled({ getItem: () => 'off' }), false)
 
-  // 隐私模式：读写都抛错时不能炸，也按「关」处理（宁可不跳，不要悄悄切走用户）。
+  // 隐私模式：读写都抛错时不能炸，按默认「跟随」处理。
   const broken = {
     getItem: () => { throw new Error('denied') },
     setItem: () => { throw new Error('denied') },
   }
-  assert.equal(internals.navFollowEnabled(broken), false)
-  assert.doesNotThrow(() => internals.setNavFollow(true, broken))
-  assert.equal(internals.navFollowEnabled({}), false, '没有存储时默认关')
-  assert.equal(internals.navFollowEnabled(), false, '真实环境默认关')
+  assert.equal(internals.navFollowEnabled(broken), true)
+  assert.doesNotThrow(() => internals.setNavFollow(false, broken))
+  assert.equal(internals.navFollowEnabled({}), true, '没有存储时默认跟随')
+  assert.equal(internals.navFollowEnabled(), true, '真实环境默认跟随')
 })
 
-test('默认不跟随：到场的通知请求只出提示条，不会自动导航', async () => {
+test('显式关闭跟随：到场的通知请求只出提示条，不会自动导航', async () => {
   const { __internals: internals } = loadClientBundle()
   // 源码契约：落点 effect 里先看开关，关了就走 offer 分支（提示 + 「定位」按钮），
   // 绝不调用 applyReveal。
@@ -253,7 +253,7 @@ test('默认不跟随：到场的通知请求只出提示条，不会自动导�
   internals.requestPanelReveal({ sessionId: 'sess-notify', instanceId: 'inst-b', reason: 'showSession' })
   const queued = internals.takePanelReveal()
   assert.equal(queued?.sessionId, 'sess-notify')
-  assert.equal(internals.navFollowEnabled(), false)
+  assert.equal(internals.navFollowEnabled(), true, '默认开；这条用例只验证 off 分支的源码契约')
 })
 
 test('通知点击不被开关挡住：面板照常被激活、请求照常入队', async () => {
@@ -266,8 +266,62 @@ test('通知点击不被开关挡住：面板照常被激活、请求照常入�
   })
   assert.equal(queued, true)
   assert.equal(log.opened, 1, '默认关也只影响「自动跳」，不影响点通知选中面板')
-  assert.equal(log.enqueued.length, 1, '请求照常交给面板（面板顶部给「定位」）')
-  assert.equal(internals.navFollowEnabled(), false)
+  assert.equal(log.enqueued.length, 1, '请求照常交给面板并自动定位')
+  assert.equal(internals.navFollowEnabled(), true)
+})
+
+test('Router 会话常驻 retain：面板关着也算本面板的落点，消失/卸载才释放', () => {
+  const { __internals: internals } = loadClientBundle()
+  const retained = new Map()
+  const released = []
+  internals.setRetainSessionsService({
+    retain(sessionId, options) {
+      retained.set(sessionId, options)
+      return {
+        release: () => {
+          retained.delete(sessionId)
+          released.push(sessionId)
+        },
+      }
+    },
+  })
+
+  assert.equal(internals.syncRouterRetains(stateWithRoutes().routers), 2)
+  assert.deepEqual([...retained.keys()].sort(), ['session-default-router', 'session-other-router'])
+  assert.equal(retained.get('session-default-router').source, 'superAgentUi', '来源必须和 awayNotifyPanels 注册一致')
+
+  // 幂等：同一个 Router 不会重复 retain。
+  internals.syncRouterRetains(stateWithRoutes().routers)
+  assert.equal(retained.size, 2)
+  assert.equal(released.length, 0)
+
+  // 实例关闭/Router 消失：只释放消失的那条。
+  internals.syncRouterRetains([{ sessionId: 'session-default-router', instanceId: 'default' }])
+  assert.deepEqual(released, ['session-other-router'])
+  assert.deepEqual([...retained.keys()], ['session-default-router'])
+
+  // 应答缺 routers（老宿主/坏响应）：不能把现有归属清空。
+  internals.syncRouterRetains(undefined)
+  assert.equal(retained.size, 1)
+
+  internals.releaseAllRouterRetains()
+  assert.equal(retained.size, 0)
+})
+
+test('连续两条不同实例的通知：每次定位都带对应实例，不串台', async () => {
+  const { __internals: internals } = loadClientBundle()
+  const seen = []
+  const deps = {
+    openPanel: () => true,
+    readState: async () => stateWithRoutes(),
+    enqueue: (request) => { seen.push(request); return true },
+  }
+  await internals.revealNotificationSession('session-other-router', deps)
+  await internals.revealNotificationSession('session-default-router', deps)
+  assert.deepEqual(seen.map((row) => [row.sessionId, row.instanceId]), [
+    ['session-other-router', 'inst-other'],
+    ['session-default-router', 'default'],
+  ])
 })
 
 test('注册给 away-notify 的 showSession 真的会把请求交给面板队列', async () => {

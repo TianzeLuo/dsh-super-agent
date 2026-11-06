@@ -4,15 +4,15 @@
 
 ### Fixed
 
-- **Router 会话也不再弹 away-notify 通知**：Router 是普通 Session（没有
-  `origin: 'subagent'` / `delegationDepth`），away-notify 会在它 `turn/end` 时弹通知并写
-  `pendingFocus`，用户回来时被原生切到 Router/关掉面板。现在 Router 安装成功后由
-  `internalSessions.register(agent.id, 'super-agent-router')` 登记为内部会话，
-  cleanup / agent 销毁时释放；worker 仍用 `'super-agent-worker'`。登记只进 away-notify
-  的内存注册表，不写 Session header，不影响会话列表/历史/其它插件。面板自己的未读
-  徽标走 `session/event` + `attendance.js`，与 away-notify 解耦，已用
-  `markInternal` 在场的多实例未读测试覆盖。回归：`test/plugin.test.mjs`、
-  `test/internal-sessions.test.mjs`。
+- **Router 通知恢复，点击落到面板而不是主视图**：回退「Router 也登记为 internal」——
+  那会让 super-agent 完全静默，不是用户要的。Router 的 `turn/end` 照常弹通知；插件按
+  `/ui/state` 的 `routers` 在**插件层常驻 retain** 所有 live Router（来源
+  `superAgentUi`，与面板挂载期的 retain 叠加），面板关着也算落点。away-notify 的
+  `panelForSession` 于是走 `selectPanel(panelId) + showSession`，不会掉进
+  `switchTo → openSession → replaceMain('reveal') → selectPanel(null)`（关面板 + 主视图
+  开会话）。`showSession` 仍由 `revealNotificationSession` 映射实例并 adopt 会话，重复
+  调用幂等；「自动跟随」恢复默认开（显式 `off` 才只提示），点通知才真正切到对应实例/
+  会话。worker 仍保持 internal，不弹通知。回归：`test/notification-nav.test.mjs`。
 
 ### Added
 

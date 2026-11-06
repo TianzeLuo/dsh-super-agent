@@ -56,16 +56,13 @@ dataDir、模型/规则/定时任务和未读计数；切换实例不会串数�
 「`document.visibilityState` 可见 + `layout.panelInfo.activePanelId` 是本面板」
 上报，和清零共用这一个定义。
 
-**「打开面板被自动切走」的根因不在面板本身**：super-agent 的 Router 与 worker 都是普通
+**「打开面板被自动切走」的根因不在面板本身**：super-agent 派发的 worker 是普通
 Session（header 上没有 `origin: 'subagent'`），之前会被 dsh-away-notify 当成用户会话，
 在 `turn/end` 时弹通知并写下 `pendingFocus`；下次窗口/标签页回到前台时，away-notify 的
 `consumePendingFocus` 会 `switchTo → replaceMain → selectPanel(null)`，于是面板被关、
-界面跳到没有用户可读内容的 worker 会话。修复放在源头：安装 Router、创建/恢复 worker 时
-由创建方调用 `awayNotify.markInternal(sessionId, 'super-agent-router' / 'super-agent-worker')`
-（见 `lib/internal-sessions.js`），away-notify 的 `rootsOnly` 判定就会按「内部会话」静默，
-不再产生通知和 pendingFocus。登记只存在 away-notify 自己的内存注册表里，不写 Session
-header，不影响会话列表/历史/其它插件；面板自己的未读徽标走 `session/event` +
-`attendance.js`，照常更新。
+界面跳到没有用户可读内容的 worker 会话。修复放在源头：worker 创建/恢复时由创建方调用
+`awayNotify.markInternal(sessionId, 'super-agent-worker')`（见 `lib/internal-sessions.js`），
+away-notify 的 `rootsOnly` 判定就会按「内部会话」静默，不再产生通知和 pendingFocus。
 
 **导航守卫默认关**：曾经为了对抗上述症状加过「没有用户手势就不许切走面板 / 不许换会话」
 的守卫，但系统通知点击在页面里没有任何指针事件，这条启发式会把 away-notify 的正常回跳
@@ -77,7 +74,7 @@ header，不影响会话列表/历史/其它插件；面板自己的未读徽标
 **系统通知点击**：完全交给 dsh-away-notify 的原生行为——普通会话点通知正常跳回该会话；
 目标会话被本面板 retain 时由 away-notify 激活面板（`awayNotifyPanels` 显式登记）。
 页面不可见/失焦时弹过的通知会在回到前台时被 away-notify 消费，这是它本来的语义；
-Router/worker 不再弹通知，因此不会再把界面带去 super-agent 的内部会话。
+worker 会话不再弹通知，因此不会再把界面带去 worker。
 
 **同一页面只会跑一份**：同一个包的 client 确实可能求值两次——启动时进聚合 boot
 combo（`plugins/??…dsh-super-agent/client.js…&rev=…`），之后 `dsh-client-hmr` 每
@@ -120,14 +117,19 @@ ui-conversation；唯一可注入的是会话自己的 `main.conversation` 子�
 `dsh-away-notify`（见它的 `docs/plugin-api.md`「面板点击落点」）。点击后先选中面板，
 再用 `/ui/state` 的 `routers` 把会话映射到实例，然后切实例（`/ui/instances/active` +
 ensure）并 adopt 那条会话；面板顶部给一条可撤销的提示（「返回」回到你原来看的实例与
-会话）。**已经在目标实例/面板上也照样定位**，不会变成空操作。**自动跟随默认关**：away-notify 的待跳转会话是发通知时就写下的（`host.js:461-465`，
-TTL 90 秒 `:721`），之后任意一次焦点/可见性恢复都会消费它（`client.js:1139-1153`），
-所以「只是 Alt-Tab 切回来 / 刚打开面板」也会被跳到最后那条通知的会话，而且点通知和切
-焦点在页面内无法区分（都走 `showSession(sessionId)`，不带来源）。因此默认只提示不跳转：
-面板顶部给一条提示 + 「定位」按钮，点一下才跳；顶部还有一枚 **「跟随：关 / 跟随：开」**
-按钮（`localStorage['dsh.super-agent.navFollow']` 写 `on` 即恢复旧的自动跟随），
-提示条里也带「以后自动跟随」。这个开关只影响本面板的自动落点：通知照弹、点通知照常
-选中面板、其它面板不受影响。
+会话）。**已经在目标实例/面板上也照样定位**，不会变成空操作。
+
+**自动跟随默认开**（显式 `localStorage['dsh.super-agent.navFollow']='off'` 才关闭）：
+点通知 → 选中面板 → 切到对应实例 → adopt 那条 Router 会话，和普通会话点通知一样。
+保留「跟随：关」开关只是留给「切回窗口不想被任何待跳转会话带走」的场景；关闭后只出
+提示条 +「定位」按钮，点击不自动跳。
+
+**Router 会话常驻 retain**：插件按 `/ui/state` 的 `routers` 在插件层 retain 所有 live
+Router（来源 `superAgentUi`，与面板内的 retain 叠加）。这样即使面板关着，away-notify
+的 `panelForSession` 也能看到「这条会话属于 super-agent 面板」，走
+`selectPanel(panelId) + showSession` 分支；不会掉进 `switchTo → openSession →
+replaceMain('reveal') → selectPanel(null)`（那条会关面板、把 Router 开成主视图里的普通
+会话）。Router 消失/实例关闭/插件卸载时释放常驻 retain。
 
 排障：地址栏加 `?navdebug=1` 打开导航诊断（默认关闭；结构化一行：`{type,source,target,at,detail}` + 两帧调用点）。每条日志都带 `source`：
 `layout.panelInfo`（宿主直接写 store，如 `retainMainPanels`）、`layout.selectPanel`

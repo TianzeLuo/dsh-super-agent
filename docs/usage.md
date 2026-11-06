@@ -40,16 +40,17 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 - Worker Session 不出现在侧栏，`[super-agent]` 内部 trigger 不出现在聊天流。
 - 点通知（`dsh-away-notify`）会回到产生它的**实例 + 会话**：选中面板 → 切实例 →
   adopt 那条会话，面板顶部给一条可撤销提示。已经在那个实例/面板上也照样定位。
-  **自动跟随默认关**（`localStorage['dsh.super-agent.navFollow']`，写 `on` 打开）：
-  通知只提示不自动跳转，点提示条里的「定位」再跳；顶部「跟随：关/开」是同一个开关。
-  这样 Alt-Tab 切回来不会被跳到旧通知的会话。
-- 打开面板后如果被自动切走：根因是 Router/worker 会话以前会被 away-notify 弹通知
-  （普通 Session 没有内部标记），回到前台时 away-notify 消费 pendingFocus 把界面切到
-  该会话。现在 Router 安装、worker 创建/恢复时由本插件调用 `awayNotify.markInternal`
-  登记为内部会话，away-notify 不再为它们弹通知，也就不会切走面板；面板自己的未读
-  徽标照常更新（走 `session/event`，不依赖 away-notify）。导航守卫**默认关**（原生
-  导航原样生效）；只有手动 `localStorage['dsh.super-agent.navGuard'] = 'on'` 才启用
-  诊断式拦截，排障看 `__SA_NAV_LOG__` 的 `nav.close` / `nav.restored`（带调用栈）。
+  **自动跟随默认开**（`localStorage['dsh.super-agent.navFollow']`，写 `off` 关闭）：
+  点通知直接打开面板并定位到对应实例/会话；关闭后只提示不自动跳，点提示条里的
+  「定位」再跳。顶部「跟随：关/开」是同一个开关。没有待跳转通知时，切窗口/切标签
+  不会跳；有待跳转通知时与普通会话一致（away-notify 只有一条消费通路，点击和回到
+  前台不可区分）。
+- 打开面板后如果被自动切走：根因是 worker 会话以前会被 away-notify 弹通知（普通
+  Session 没有内部标记），回到前台时 away-notify 消费 pendingFocus 把界面切到该会话。
+  现在 worker 创建/恢复时由本插件调用 `awayNotify.markInternal` 登记为内部会话，
+  away-notify 不再为它弹通知，也就不会切走面板。导航守卫**默认关**（原生导航原样
+  生效）；只有手动 `localStorage['dsh.super-agent.navGuard'] = 'on'` 才启用诊断式拦截，
+  排障看 `__SA_NAV_LOG__` 的 `nav.close` / `nav.restored`（带调用栈）。
 - 文件预览是面板右侧的一列（560px，最宽 640px）：对话区跟着变窄，Esc 或右上角 ✕ 关闭。
   正文用宿主官方 `CodeBlock` / `MarkdownText`，`.tex`/Markdown 的代码围栏也能正常渲染。
 - 排障：地址栏加 `?navdebug=1`（默认关闭），每条日志带 `source`（`layout.panelInfo` /
