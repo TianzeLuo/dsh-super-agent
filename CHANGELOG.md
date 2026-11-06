@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed
+
+- **移除「跟随」按钮与 localStorage 开关**：面板顶部不再有「跟随：开/关」，也不再写
+  `dsh.super-agent.navFollow`；通知落点固定为 away-notify 原生行为（`showSession` →
+  `applyReveal`），相关文案、off 分支、测试全部删除。
+- **README 精简**：只留「是什么 / 安装 / 快速开始 / 关键功能 / 可选联动 / 截图 / 文档
+  索引」，架构、开发、测试、排障拆到 `docs/design.md`、`docs/development.md`、
+  `docs/testing.md`、`docs/troubleshooting.md`。
+- **独立性证据**：新增 `test/independence.test.mjs`（不跨包 import、只声明宿主基础
+  service、away-notify/uiWorkspace 均可选）。
+
 ### Fixed
 
 - **Router 通知恢复，点击落到面板而不是主视图**：回退「Router 也登记为 internal」——
@@ -11,8 +22,8 @@
   `panelForSession` 于是走 `selectPanel(panelId) + showSession`，不会掉进
   `switchTo → openSession → replaceMain('reveal') → selectPanel(null)`（关面板 + 主视图
   开会话）。`showSession` 仍由 `revealNotificationSession` 映射实例并 adopt 会话，重复
-  调用幂等；「自动跟随」恢复默认开（显式 `off` 才只提示），点通知才真正切到对应实例/
-  会话。worker 仍保持 internal，不弹通知。回归：`test/notification-nav.test.mjs`。
+  调用幂等，点通知才真正切到对应实例/会话。worker 仍保持 internal，不弹通知。
+  回归：`test/notification-nav.test.mjs`。
 
 ### Added
 

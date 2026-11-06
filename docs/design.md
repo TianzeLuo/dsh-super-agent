@@ -189,10 +189,10 @@
 24. **导航排障默认零成本**：`?navdebug=1` 才订阅 `panelInfo`、监听焦点/可见性，并把
     `activePanelId`/实例/会话变化连调用栈累积到 `window.__SA_NAV_LOG__`。关闭时只有一次
     字符串判断——排障开关本身不能改变导航行为，也不能给「谁改了面板选择」引入新变量。
-    自动跟随**默认开**（只有显式 `localStorage['dsh.super-agent.navFollow']='off'` 才关）：
-    super-agent 的通知要和普通会话一样能跳。away-notify 只有 `consumePendingFocus → focusPanel →
+    落点**固定为 away-notify 原生行为**，面板不提供「跟随」开关、也不写任何 localStorage：
+    super-agent 的通知和普通会话一样能跳。away-notify 只有 `consumePendingFocus → focusPanel →
     showSession(sessionId)` 一条通路（`client.js:520`），不带来源标记，点通知与切焦点不可区分；
-    关闭开关只用于「不想被待跳转会话带走」的场景（只提示 +「定位」）。
+    面板能做的是把 `showSession` 落准（常驻 retain + 实例映射 + adopt），而不是再拦一层。
     落点能稳定回到面板靠的是**插件级常驻 retain**：按 `/ui/state.routers` retain 所有 live
     Router（来源 `superAgentUi`，与面板挂载期的 retain 叠加），面板关着时
     `panelForSession` 仍能命中 `selectPanel(panelId) + showSession` 分支，而不是
@@ -651,7 +651,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 宿主 goal | `test/host-goals.test.mjs` | restrict 名单、guard 拒绝/放行、pre-execute 兜底、armed 即 disarm、resume 再 disarm、dispose 释放 |
 | 文件链接 | `test/file-link.test.mjs` | 地址解析（session/absolute/盘符/UNC）、无会话才接管、普通会话放行、无接收器回退、读取请求参数 |
 | 文件预览 | `test/file-preview.test.mjs` | 注入面形状（宿主 `WorkspaceFiles`）、`read`/`readBytes` 参数与 `RemoteResult` 拆解、图片后缀→媒体类型、正文交给官方 `CodeBlock`/`MarkdownText`、行号对齐、截断与降级文案、二进制/缺组件提示 |
-| 通知点击落点 | `test/notification-nav.test.mjs` | 点击 → 面板/实例/会话三者都被请求、已在目标仍定位、状态读不到也不中止、会话→实例只信 `routers`、挂载前排队取一次即清空、`?navdebug=1` 才有订阅与 `__SA_NAV_LOG__`（关闭零副作用）、自动跟随默认开/显式 off、开关持久化、Router 常驻 retain（面板关着也算落点、消失释放、坏响应不清空）、连续两条不同实例不串台、navdebug 来源标签（away-notify/layout/守卫） |
+| 通知点击落点 | `test/notification-nav.test.mjs` | 点击 → 面板/实例/会话三者都被请求、已在目标仍定位、状态读不到也不中止、会话→实例只信 `routers`、挂载前排队取一次即清空、`?navdebug=1` 才有订阅与 `__SA_NAV_LOG__`（关闭零副作用）、落点固定原生（无跟随开关）、Router 常驻 retain（面板关着也算落点、消失释放、坏响应不清空）、连续两条不同实例不串台、navdebug 来源标签（away-notify/layout/守卫） |
 | 预览抽屉 | `test/preview-drawer.test.mjs` | 预览列样式（右侧、无 `inset`、无遮罩、可拖拽条、标签栏横向滚动）、`PreviewColumn` 复用 `drawer` 变体、头部标签数/高亮/每标签关闭按钮、每个标签一份常驻正文、点外面不关（加标签）、`Esc` 交给自定义行为、输入框里的 `Esc` 不关、下拉菜单算「里面」、错误边界接住异常、错误摘要不塞整段栈、面板槽位整体有边界 |
 | 预览多标签 | `test/preview-tabs.test.mjs` | 新文件追加并激活（不覆盖已有）、同文件重复点击只激活、关闭当前标签激活右邻/最后一个收起、关闭非活动标签不动当前、列宽 640/480、给对话留 320、拖拽上下限、标签名/图标映射 |
 | 面板守卫（默认关） | `test/nav-guard.test.mjs` | 缺省/`off` 不包装（原生放行）、显式 `on` 才拦（三条宿主路径）、有手势放行、手势一次性、直接写 store 时条目还在就恢复、默认关时拆掉上一版留在 window 上的守卫、解绑恢复原方法并移除监听、开关关闭与冻结服务不崩 |
@@ -662,7 +662,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 315 个用例，全部不需要模型调用。
+共 317 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
