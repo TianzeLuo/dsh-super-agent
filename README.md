@@ -107,8 +107,9 @@ combo（`plugins/??…dsh-super-agent/client.js…&rev=…`），之后 `dsh-cli
 `activePanelId ?? 'conversation'`（`dsh-client-ui-layout/lib/client.js:119`），而
 `conversation` 已被 ui-conversation 占用（`:20019-20026`）；`uiSession.provide()` 只提供
 数据 hooks/props（`dsh-client-ui-session/lib/client.js:849`）。所以插件面板里只能用宿主
-同一批正文组件（`CodeBlock` / `MarkdownText`），预览做成**面板内的一列**（560px，最宽
-640px）：对话区 `flex:1 1 auto; min-width:0` 跟着变窄，观感与官方三列一致。
+同一批正文组件（`CodeBlock` / `MarkdownText`），预览做成**面板内的一列**（宽屏 640、
+面板 < 1000 时 480，可拖到 360–720）：对话区 `flex:1 1 auto; min-width:0` 跟着变窄，
+观感与官方三列一致。
 
 座位归属把这条路彻底堵死：`shell.leading` 归 `dsh-client-ui-sidebar`（`lib/client.js:523`）、
 `rightbar` 归 `dsh-client-ui-sidebar-right`（`:4915`），`main` 里 `conversation` 归
@@ -169,12 +170,16 @@ TTL 90 秒 `:721`），之后任意一次焦点/可见性恢复都会消费它�
   取，写成 `ctx.remote.workspaceFiles` 会因未声明 inject 而抛错；接口或官方组件缺席时
   预览给出可读提示和重试按钮，面板照常工作。PDF/Office/视频面板不渲染，提示用官方
   链接查看。普通会话里的文件链接仍然走官方右侧栏，行为不变。
-  预览是**右侧抽屉**：贴面板右侧、宽 640（设置类 520）、高 100%、正文自己滚动，
-  **不画遮罩**——左栏、顶部和输入框始终可见可点；`Esc`、右上角 ✕、点抽屉外都能关。
-  官方渲染器万一在渲染期抛错，只让抽屉正文显示错误态（含「重试」），面板和宿主界面
-  都不受影响，不需要刷新。截图：`docs/screenshots/preview-drawer-{light,dark}.png`
-  （生成脚本 `test/manual/make-preview-screenshots.mjs`，用的是 `lib/client.js` 里
-  真实的样式对象）。
+  预览是**面板里的一列**（不是浮层）：宽屏 640、面板 < 1000 时 480，左缘可拖拽
+  （360–720，始终给对话区留 ≥ 320；方向键微调、双击 480/640 切换）；打开时不再渲染
+  右侧「近期活动栏」，关闭后恢复。行为对齐宿主右侧栏：一个文件一个标签，点新文件
+  **追加并激活**、不关已有标签；同文件重复点击只激活；标签栏可横向滚动（文件名 +
+  类型图标 + 当前标签高亮 + 每个标签的关闭按钮）；关当前标签激活相邻、关到最后一个
+  才收起整列；每个标签正文常驻，切换不重新读取、不丢滚动。`Esc` 逐级关标签；点会话
+  里的另一个文件链接是「再开一个标签」，不会先把整列关掉。官方渲染器万一在渲染期
+  抛错，只让该标签正文显示错误态（含「重试」），面板和宿主界面都不受影响，不需要刷新。
+  截图：`preview-tabs-light.png` / `preview-tabs-dark.png`（两个文件、两个标签）；
+  旧版单文件对照 `preview-column-{closed,open}-light.png`、`preview-hw7-dark.png`。
 
 ### Worker 复用
 
