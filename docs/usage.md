@@ -118,6 +118,29 @@ commandcode）。每条可以写：
 此时面板会显示“当前只显示 N 个 / DSH 共 M 个”，并给出一键
 「使用 DSH 全部模型」（清空 `allowed`、`onlyProvider`、`onlyNames`，默认模型保持不变）。
 
+## 审批与阻塞
+
+Worker 在宿主要求**手动审批权限**时，任务会立刻变成 `blocked-approval`：面板活动
+行显示「等待审批」，Router 收到一条 `approval-request` trigger（含任务 id、工具、
+命令/路径摘要、原因与可选的 allow/deny 建议）。默认 60 秒没有决定，watchdog 会再
+升级一次。审批决定后任务回到 `working`，等待标记与面板提示一起消失。
+
+`superagent_dispatch` 可以带 `approval` 参数：
+
+- `ask`（默认）：所有审批请求转人工；
+- `auto-workspace` / `deny-all`：**本版本只记录到任务与 journal**，仍转人工；
+  策略 answerer 是后续 B 阶段的接口预留，见
+  [审批阻塞设计](approval.md)。
+
+配置（可选）：
+
+```json
+{
+  "approval": { "mode": "ask" },
+  "watchdog": { "approvalTimeoutMs": 60000 }
+}
+```
+
 ## 长期工作约定
 
 约定保存在 `<项目根>/.dsh/super-agent.agreements.json`，不放在 generation 的
@@ -370,6 +393,8 @@ node bin/super-agent.mjs config
   `onlyNames` 过滤，再空则跟随宿主全部目录。面板会显示过滤原因和
   “DSH 共 N 个”的总数。`default` 必须是 allowlist 里的 `id` 或 `provider/model`。
 - `models.defaultEffort`：默认思考强度；为空用模型自己的默认。
+- `approval.mode`：`ask` / `auto-workspace` / `deny-all`；本版本只记录，不自动
+  回答。`watchdog.approvalTimeoutMs` 是审批等待升级时间（默认 60000ms）。
 - `agreements.fileName`：相对项目根 `.dsh/` 的文件名；一般不用改。
 - `schedule.maxActive`：活跃定时任务上限；`timeZone` 是未传时区时的默认 IANA
   时区，空表示用宿主本地时区。

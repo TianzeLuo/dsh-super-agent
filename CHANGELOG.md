@@ -27,6 +27,18 @@
 
 ### Added
 
+- **Worker 审批阻塞可见（A）**：`approval/asked` 一到就把任务标成
+  `blocked-approval`，写 `approval.asked` 审计并给 Router 发 `approval-request`
+  trigger（任务 id、工具、命令/路径摘要、原因、可选建议）；`approval/decided`
+  后写 `approval.resolved`、恢复 `working`（原 trigger 仍在 pending 时补一条
+  resolved trigger）。面板新增“等待审批”标签与详情；watchdog 新增
+  `approvalTimeoutMs`（默认 60s）超时升级，只升级一次；重启恢复把该状态当
+  running 处理。回归：`test/approval.test.mjs`（9 项）。
+- **审批策略接口预留（B）**：`superagent_dispatch` 新增 `approval` 参数
+  （`ask` / `auto-workspace` / `deny-all`），策略写入 task/journal；
+  `lib/approval.js` 提供策略解析、命令/路径摘要脱敏、建议与
+  `createApprovalAnswerer` 工厂，但本版本不注册自动 answerer，所有请求仍转人工。
+  设计见 `docs/approval.md`。
 - **预览列多标签（对齐宿主右侧栏）**：一个文件一个标签，点新文件追加并激活、不关已有
   标签；标签栏可横向滚动，文件名 + 类型图标 + 当前标签高亮 + 每个标签的关闭按钮；
   关闭当前标签激活相邻、关到最后一个才收起整列；同一文件重复点击只激活已有标签。

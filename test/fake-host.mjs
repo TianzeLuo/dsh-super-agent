@@ -301,6 +301,7 @@ export function setupRuntime(options = {}) {
   const config = mergeConfig(DEFAULTS, options.config ?? {})
   const models = options.models ?? fakeModels()
   const schedule = options.schedule ?? fakeSchedule()
+  const now = options.now ?? Date.now
   const runtime = new SuperAgentRuntime({
     agent: router,
     store,
@@ -317,6 +318,7 @@ export function setupRuntime(options = {}) {
     resumeWorker: options.resumeWorker,
     logger: { warn: () => undefined, info: () => undefined },
     timers,
+    now,
   })
   runtime.start()
   return { ...project, store, children, router, subagents, sessionWorkers, timers, config, runtime, models, schedule }
