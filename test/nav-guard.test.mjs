@@ -846,3 +846,33 @@ test('拦下跨会话跳转时把 Super-agent 面板切到前台（定位提示�
   assert.equal(internals.takePanelReveal()?.sessionId, 's-2')
   guard()
 })
+
+test('最小化/窗口失焦后恢复且有待跳转会话：仍不跳（选方案 2，只留提示条）', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const workspace = fakeWorkspace()
+  let clock = 100_000
+  const guard = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => clock,
+    storage: { getItem: () => 'on' },
+    isRegistered: () => true,
+    sessions: fakeSessions('s-1'),
+    workspace,
+  })
+  internals.takePanelReveal()
+
+  // 窗口失焦 → 最小化（hidden）→ 5 秒后恢复 → 聚焦，随后 pendingFocus 被消费。
+  doc.hidden = true
+  doc.fire('visibilitychange')
+  clock += 5_000
+  doc.hidden = false
+  doc.fire('visibilitychange')
+  workspace.openSession('s-9')
+
+  assert.deepEqual(workspace.opened, [], '恢复窗口不自动跳（与切标签页同判）')
+  assert.equal(internals.takePanelReveal()?.sessionId, 's-9', '降级为面板内定位提示条')
+  guard()
+})
