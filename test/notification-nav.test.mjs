@@ -166,6 +166,51 @@ test('?navdebug=1：activePanelId 变化带调用栈进 __SA_NAV_LOG__', () => {
   assert.equal(panelEntry.detail.to, null)
   assert.match(panelEntry.stack, /notification-nav\.test\.mjs|client\.js/, '每条都要带调用栈')
   assert.equal(typeof panelEntry.at, 'number')
+  // 「谁切的」标签：面板变化来自 layout 的 panelInfo store。
+  assert.equal(panelEntry.source, 'layout.panelInfo')
+  assert.equal(entries[1].source, null, '显式调用 navLog 时允许没有来源标签')
+})
+
+test('navdebug 的来源标签能区分 away-notify / layout 服务 / 我们自己的守卫', async () => {
+  const bundle = loadClientBundle({}, { location: { search: '?navdebug=1' } })
+  const { __internals: internals } = bundle
+
+  await internals.revealNotificationSession('session-other-router', {
+    openPanel: () => true,
+    readState: async () => stateWithRoutes(),
+    enqueue: () => true,
+  })
+
+  // layout.selectPanel 的包装（面板守卫）也要带标签：假装我们的面板在台上。
+  const layout = {
+    panelInfo: { getSnapshot: () => ({ activePanelId: 'super-agent' }), subscribe: () => () => {} },
+    selectPanel: () => {},
+  }
+  const doc = { addEventListener: () => {}, removeEventListener: () => {} }
+  const dispose = internals.installNavGuard({}, {
+    layout,
+    document: doc,
+    now: () => 1_000,
+    storage: { getItem: () => null },
+    isRegistered: () => true,
+  })
+  layout.selectPanel(null)
+  dispose()
+
+  const entries = bundle.__window.__SA_NAV_LOG__
+  const bySource = (source) => entries.filter((entry) => entry.source === source)
+  const reveal = bySource('away-notify.showSession')
+  assert.equal(reveal.length, 1, '点通知落点标 away-notify.showSession')
+  assert.equal(reveal[0].kind, 'reveal.notification')
+  assert.equal(reveal[0].detail.sessionId, 'session-other-router')
+  assert.equal(reveal[0].detail.instanceId, 'inst-other')
+  assert.ok(['foreground', 'regain'].includes(reveal[0].detail.trigger), '带一个粗判触发时机')
+  assert.equal(typeof reveal[0].detail.env.visibility, 'string')
+
+  const blocked = bySource('layout.selectPanel').filter((entry) => entry.kind === 'nav.blocked')
+  assert.equal(blocked.length, 1, '自动切走标 layout.selectPanel')
+  assert.equal(blocked[0].detail.to, null)
+  assert.match(blocked[0].stack, /navLog|guardedSelectPanel/, '仍带调用栈')
 })
 
 test('自动跟随开关：默认关，只有显式 on 才跟随（隐私模式下也按关处理）', () => {
