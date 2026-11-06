@@ -81,7 +81,12 @@ TTL 90s）→ `:1003 switchTo` → `:922` 里 `resolveSessionOpener` 拿到
 `sessions.retain(..., {source:'mainView'})` + `selection.set(...)`，最后才 `selectPanel(null)`。
 所以面板守卫看到时**会话已经换掉了**。我们在守卫里同时包一层会话打开器
 （`uiWorkspace.openSession` / `sessions.open`）：没有用户手势窗口（1.5s）的跨会话跳转
-直接拦下，只排一条面板内「定位」提示（用户点一下才切）。旁路：`authorizeNavigation()`
+直接拦下，只排一条面板内「定位」提示（用户点一下才切）。放行「点通知」的三条精确信号：
+① 页面内 toast 点击（pointerdown/keydown 等手势，1.5s 窗口）；② 通知以新标签页打开时
+URL 上的 `?dshAwayNotifyFocus=<id>`（`dsh-away-notify/lib/host.js:426`）；③ 文档从
+hidden 回到 visible 且离开时间在 0.4–20 秒之间（系统通知点击时窗口通常在最小化/别的
+桌面，页面收不到任何指针事件，这是唯一信号），该次放行只一次。同一桌面 Alt-Tab
+（只有 window focus、文档一直 visible）和离开超过 20 秒后回来都不放行。旁路：`authorizeNavigation()`
 给「点击后 await 过」的自有导航（如在会话中打开 Worker）授权；启动/首次导航
 （还没有当前会话）与目标即当前会话都直接放行。
 
