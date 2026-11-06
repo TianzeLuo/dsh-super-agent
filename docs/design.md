@@ -161,6 +161,9 @@
     「占一列、内容缩宽」同观感。官方右栏在插件面板里用不了（`ui-sidebar-right` 在
     `activePanelId !== null` 时整体停用、`openResource` 抛 `no session surface is mounted`），
     宿主也没有 per-session surface 接口，所以正文改用官方 `CodeBlock` / `MarkdownText`。
+33. **守卫必须防「静默消失」**：非属主实例的还原是空操作；每次可见性变化自愈
+    `selectPanel` 包装。面板关闭只有 `clearMain`/`replaceMain` 两处 `selectPanel(null)`，
+    前端没有 URL 路由导航。
 32. **「点了通知」必须有精确信号才放行**：系统通知点击在页面里只剩
     `visibilitychange hidden→visible`（离开 0.4–20s）与 `?dshAwayNotifyFocus=`；
     同一桌面 Alt-Tab 只有 focus、不放行。一次性令牌只授权一次跨会话跳转。
@@ -652,7 +655,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 301 个用例，全部不需要模型调用。
+共 304 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录

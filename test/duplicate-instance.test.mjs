@@ -66,11 +66,15 @@ test('两份 client 求值共用同一 layout：守卫只包一层，第二份�
   })
 
   assert.equal(layout.selectPanel, wrapped, '第二份不再叠一层包装')
-  assert.equal(restoreSecond, restoreFirst, '拿回同一个还原句柄')
   assert.equal(scope[second.__internals.NAV_GUARD_REGISTRY_KEY].layout, layout)
 
+  // 第二份拿到的是**空操作**：它卸载时不能把别人装的守卫拆掉。
   restoreSecond()
-  assert.equal(scope[second.__internals.NAV_GUARD_REGISTRY_KEY], undefined, '还原后注册表清空')
+  assert.equal(layout.selectPanel, wrapped, '非属主的还原不能拆守卫')
+  assert.ok(scope[second.__internals.NAV_GUARD_REGISTRY_KEY], '注册表仍在')
+
+  restoreFirst()
+  assert.equal(scope[second.__internals.NAV_GUARD_REGISTRY_KEY], undefined, '属主还原后注册表清空')
 })
 
 test('两份 client 求值：navdebug 只有一份订阅（前一份被拆掉），日志不翻倍', () => {

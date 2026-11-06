@@ -90,6 +90,14 @@ hidden 回到 visible 且离开时间在 0.4–20 秒之间（系统通知点击
 给「点击后 await 过」的自有导航（如在会话中打开 Worker）授权；启动/首次导航
 （还没有当前会话）与目标即当前会话都直接放行。
 
+**守卫不能「静默消失」**：两处加固——① 同一个 layout 只有**属主**能还原守卫，非属主
+的 `installNavGuard` 只拿到空操作（否则 HMR 卸掉旧条目时会把守卫整层拆掉，页面看着
+正常、其实没人守）；② 每次 `visibilitychange` 顺手自愈：发现 `layout.selectPanel`
+被换掉就把包装装回去（`nav.healed`）。另外已确认前端**没有** URL/路由级导航
+（bundle 里 `pushState/replaceState` 零命中），面板关闭只有两条路径：ui-workspace
+`clearMain`(:1649) 与 `replaceMain`(:1673) 里的 `selectPanel(null)`，现在 `openSession`、
+`replaceMain`、`selectPanel` 三个入口都在守卫里。
+
 **同一页面只会跑一份**：同一个包的 client 确实可能求值两次——启动时进聚合 boot
 combo（`plugins/??…dsh-super-agent/client.js…&rev=…`），之后 `dsh-client-hmr` 每
 500ms stat 轮询 `lib/client.js`，mtime/size 一变就 `clientModules.rebuilt(id)`，
