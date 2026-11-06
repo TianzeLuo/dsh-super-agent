@@ -1,14 +1,15 @@
 /**
- * file-preview.test.mjs — 面板自绘预览的读取契约与降级回归。
+ * file-preview.test.mjs — 面板文件预览的读取契约、正文类别与降级回归。
  *
  * 背景：面板是全局 main 面板，右侧栏没有「屏上会话」，官方 `openResource` 会抛
- * `sidebarRight: no session surface is mounted`。所以插件自己读宿主文件预览接口。
+ * `sidebarRight: no session surface is mounted`（官方右栏座位在面板激活时整体隐藏，
+ * 见 lib/client.js 中 file-link 注释的出处）。所以面板自己出抽屉，但正文复用
+ * 官方 primitives（`CodeBlock` / `MarkdownText`），读取走公开的 `remote.workspaceFiles`。
  *
  * 真实宿主里 `workspaceFiles` 不是 `ctx.remote` 上的普通属性，而是 api-gateway 装出来的
  * 独立 Cordis 服务 `remote.workspaceFiles`；cordis 的嵌套服务转发按**调用方 fiber 的
- * inject** 过滤，没声明过就抛 `cannot get property … without inject`。上一轮修复用假
- * ctx 测试，没暴露这一点。这里用宿主真实导出（`WorkspaceFiles` 类）+ 真 Cordis 做形状
- * 断言，并覆盖接口缺失时的降级文案。
+ * inject** 过滤，没声明过就抛 `cannot get property … without inject`。这里用宿主真实导出
+ * （`WorkspaceFiles` 类）+ 真 Cordis 做形状断言，并覆盖接口缺失时的降级文案。
  */
 
 import { test } from 'node:test'
@@ -19,7 +20,25 @@ import { pathToFileURL } from 'node:url'
 
 import { loadClientBundle } from './client-bundle.mjs'
 
-const client = loadClientBundle()
+/** 官方 primitives 的最小替身：只提供 bundle 会读的那几个导出。 */
+const PRIMITIVES_STUB = {
+  CodeBlock: () => null,
+  MarkdownText: () => null,
+  classifyFileType: (path) => {
+    const suffix = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+    if (['png', 'jpg', 'svg'].includes(suffix)) return 'image'
+    if (['md', 'markdown', 'mdx'].includes(suffix)) return 'markdown'
+    if (suffix === 'pdf') return 'pdf'
+    if (suffix === 'docx') return 'word'
+    if (suffix === 'xlsx') return 'excel'
+    if (suffix === 'pptx') return 'ppt'
+    if (suffix === 'mp4') return 'video'
+    return 'code'
+  },
+  languageForPath: (path) => (path.endsWith('.ts') ? 'typescript' : undefined),
+}
+
+const client = loadClientBundle({ '@deepseek-ai/dsh-client-ui-primitives': PRIMITIVES_STUB })
 const internals = client.__internals
 
 /**
@@ -163,14 +182,13 @@ test('a preview reads one page through the injected face with the host call shap
 
   assert.equal(calls.length, 1)
   // 线上首参是 workspaceFileScopeId（会话 id），不是路径。
-  assert.deepEqual(calls[0].slice(0, 3), ['session-abc', 'F:/proj/a.ts', { offset: 34, limit: 400 }])
+  assert.deepEqual(calls[0].slice(0, 3), ['session-abc', 'F:/proj/a.ts', { offset: 34, limit: 2000 }])
   assert.equal(calls[0][3], controller.signal)
   assert.equal(state.status, 'ready')
   assert.equal(state.offset, 34)
   assert.equal(state.lines, 2)
   assert.equal(state.eof, false)
   assert.equal(state.text, 'const a = 1\nconst b = 2')
-  assert.equal(state.targetLine, 42)
 })
 
 test('a missing interface shows the fallback message, not a crash', async () => {
@@ -264,11 +282,166 @@ test('the real Client Remote maps our four arguments onto the workspaceFiles/rea
   assert.deepEqual({ ...calls[0].body.args }, {
     workspaceFileScopeId: 'session-abc',
     path: 'F:/proj/a.ts',
-    range: { offset: 34, limit: 400 },
+    range: { offset: 34, limit: 2000 },
   })
   // 宿主返回 RemoteResult，预览这里拆开后才拿得到正文。
   assert.equal(state.status, 'ready')
   assert.equal(state.offset, 34)
   assert.equal(state.text, 'const a = 1')
-  assert.equal(state.targetLine, 42)
+})
+
+test('the drawer picks the official body per file type', () => {
+  const { previewKindOf } = internals
+  const classify = PRIMITIVES_STUB.classifyFileType
+
+  // bundle 真的拿到了官方 primitives（抽屉里就是它的 CodeBlock/MarkdownText）。
+  assert.equal(internals.primitives, PRIMITIVES_STUB)
+
+  assert.equal(previewKindOf(classify, 'src/app.ts'), 'code')
+  assert.equal(previewKindOf(classify, 'README.md'), 'markdown')
+  assert.equal(previewKindOf(classify, 'docs/logo.png'), 'image')
+  // 面板没有 PDF/Office/视频渲染器：明确说不能预览，而不是把二进制读成文本。
+  assert.equal(previewKindOf(classify, 'spec/notes.pdf'), 'binary')
+  assert.equal(previewKindOf(classify, 'slides/deck.pptx'), 'binary')
+  // 没有官方分类器（老宿主）时按代码读，正文缺失由 noRenderer 状态兜住。
+  assert.equal(previewKindOf(undefined, 'src/app.ts'), 'code')
+  // 登记表里没有的图片后缀不当图片，避免 Blob 类型错。
+  assert.equal(previewKindOf(() => 'image', 'a.unknownimg'), 'code')
+})
+
+test('image suffixes map onto Blob media types', () => {
+  const { imageMediaTypeOf } = internals
+  assert.equal(imageMediaTypeOf('C:/p/logo.PNG'), 'image/png')
+  assert.equal(imageMediaTypeOf('assets\\icon.svg'), 'image/svg+xml')
+  assert.equal(imageMediaTypeOf('shots/a.jpeg'), 'image/jpeg')
+  assert.equal(imageMediaTypeOf('src/app.ts'), undefined)
+  assert.equal(imageMediaTypeOf('noext'), undefined)
+  assert.equal(imageMediaTypeOf(undefined), undefined)
+})
+
+test('image previews read complete bytes through the same injected face', async () => {
+  const data = new Uint8Array([137, 80, 78, 71])
+  const calls = []
+  const face = {
+    readBytes: (...args) => {
+      calls.push(args)
+      return Promise.resolve({ ok: true, value: { offset: 0, data, eof: true, size: data.length, version: 'v1' } })
+    },
+  }
+  const state = await internals.readFileBytes(() => face, { sessionId: 'session-abc', path: 'docs/logo.png' }, 'session-router')
+
+  assert.equal(calls.length, 1)
+  // readBytes(workspaceFileScope, path, options, signal)：整文件读取不传 range。
+  assert.deepEqual(calls[0].slice(0, 3), ['session-abc', 'docs/logo.png', {}])
+  assert.equal(state.status, 'ready')
+  assert.equal(state.mediaType, 'image/png')
+  assert.equal(state.data, data)
+  assert.equal(state.eof, true)
+
+  // RemoteResult 失败 → error 状态，不是异常。
+  const denied = await internals.readFileBytes(
+    () => ({ readBytes: async () => ({ ok: false, error: { code: 'workspace-file/not-found', message: 'gone' } }) }),
+    { sessionId: 'session-abc', path: 'docs/logo.png' },
+    '',
+  )
+  assert.equal(denied.status, 'error')
+  assert.equal(denied.error, 'gone')
+
+  // 接口缺失 → 降级提示；缺 readBytes 也算缺失。
+  const missing = await internals.readFileBytes(() => undefined, { sessionId: 'session-abc', path: 'docs/logo.png' }, '')
+  assert.equal(missing.status, 'unavailable')
+  const misshapen = await internals.readFileBytes(() => ({ readBytes: 'nope' }), { sessionId: 'session-abc', path: 'a.png' }, '')
+  assert.equal(misshapen.status, 'unavailable')
+
+  // 未登记后缀 → 明确错误，不去猜媒体类型。
+  const unsupported = await internals.readFileBytes(() => face, { sessionId: 'session-abc', path: 'a.bin' }, '')
+  assert.equal(unsupported.status, 'error')
+  assert.match(unsupported.error, /unsupported image suffix/)
+})
+
+test('non-body states carry a readable message in both dictionaries', () => {
+  const zh = (key) => internals.DICT.zh[key]
+  const en = (key) => internals.DICT.en[key]
+  const path = 'spec/notes.pdf'
+
+  assert.match(internals.previewMessage(zh, { status: 'binary', path }), /PDF/)
+  assert.match(internals.previewMessage(en, { status: 'binary', path }), /PDF/)
+  assert.match(internals.previewMessage(zh, { status: 'noRenderer', path }), /dsh-client-ui-primitives/)
+  assert.match(internals.previewMessage(en, { status: 'noRenderer', path }), /dsh-client-ui-primitives/)
+  // 正文态没有文案；未知态也不乱写。
+  assert.equal(internals.previewMessage(zh, { status: 'ready', path }), undefined)
+  assert.equal(internals.previewMessage(zh, { status: 'cancelled', path }), undefined)
+  assert.equal(internals.previewMessage(zh, undefined), undefined)
+})
+
+test('the drawer body hands code, markdown and images to the official components', () => {
+  // 记录 createElement 的最小 React：正文构造是纯函数，不需要 hooks 真跑。
+  const recordingReact = {
+    createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
+    useState: (initial) => [initial, () => {}],
+    useEffect: () => {},
+    useRef: (initial) => ({ current: initial }),
+    useCallback: (fn) => fn,
+    useMemo: (fn) => fn(),
+  }
+  const bundle = loadClientBundle({
+    react: recordingReact,
+    '@deepseek-ai/dsh-client-ui-primitives': PRIMITIVES_STUB,
+  })
+  const { previewBodyOf } = bundle.__internals
+  const t = (key) => bundle.__internals.DICT.en[key]
+  const inner = (element) => element.children[0]
+
+  const code = previewBodyOf(PRIMITIVES_STUB, t, {
+    kind: 'code',
+    state: { status: 'ready', path: 'src/app.ts', text: 'const a = 1\nconst b = 2', offset: 12, lines: 2, eof: true },
+    imageUrl: undefined,
+    path: 'src/app.ts',
+  })
+  const block = inner(code)
+  assert.equal(block.type, PRIMITIVES_STUB.CodeBlock, '代码正文必须由官方 CodeBlock 渲染')
+  assert.equal(block.props.lineNumbers, true, '官方行号')
+  assert.equal(block.props.wrap, true)
+  assert.equal(block.props.lang, 'typescript', '后缀 → shiki 语言走官方 languageForPath')
+  assert.equal(block.props.copyLabel, 'Copy')
+  assert.equal(block.props.copiedLabel, 'Copied')
+  // 从第 12 行开始读：补 11 个空行，行号才和文件真实行号一致。
+  assert.equal(block.props.code, `${'\n'.repeat(11)}const a = 1\nconst b = 2`)
+
+  const markdown = inner(previewBodyOf(PRIMITIVES_STUB, t, {
+    kind: 'markdown',
+    state: { status: 'ready', path: 'README.md', text: '# 标题', offset: 1, lines: 1, eof: true },
+    imageUrl: undefined,
+    path: 'README.md',
+  }))
+  assert.equal(markdown.type, PRIMITIVES_STUB.MarkdownText, 'markdown 正文由官方 MarkdownText 渲染')
+  assert.equal(markdown.props.text, '# 标题')
+
+  const picture = inner(previewBodyOf(PRIMITIVES_STUB, t, {
+    kind: 'image',
+    state: { status: 'ready', path: 'docs/logo.png', mediaType: 'image/png', data: new Uint8Array([1]), eof: true },
+    imageUrl: 'blob:preview',
+    path: 'docs/logo.png',
+  }))
+  assert.equal(picture.type, 'img', '图片用 readBytes 的字节转 object URL')
+  assert.equal(picture.props.src, 'blob:preview')
+  assert.equal(picture.props.alt, 'docs/logo.png')
+
+  // 面板没有 PDF/Office 渲染器：不猜、不读成文本，给一条说明。
+  const binary = previewBodyOf(PRIMITIVES_STUB, t, {
+    kind: 'binary',
+    state: { status: 'binary', path: 'spec/notes.pdf' },
+    imageUrl: undefined,
+    path: 'spec/notes.pdf',
+  })
+  assert.match(String(inner(binary)), /PDF/)
+
+  // 宿主没有官方组件：明确说无法渲染，而不是白屏。
+  const noRenderer = previewBodyOf(undefined, t, {
+    kind: 'code',
+    state: { status: 'ready', path: 'a.ts', text: 'x', offset: 1, lines: 1, eof: true },
+    imageUrl: undefined,
+    path: 'a.ts',
+  })
+  assert.match(String(inner(noRenderer)), /dsh-client-ui-primitives/)
 })

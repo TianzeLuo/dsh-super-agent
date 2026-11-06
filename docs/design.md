@@ -30,7 +30,7 @@
 | 组件 | 文件 | 职责 | 不做什么 |
 | --- | --- | --- | --- |
 | 插件入口 | `lib/index.js` | 项目开关、Router 认领、注册工具/提示词/HTTP/UI、租约、跨项目 Session Worker | 不做调度 |
-| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话、右侧活动栏与任务详情、模型/规则/定时任务抽屉、二次确认重置、Worker/旧 Router 展示层隐藏；无项目选择器 | 不定义消息协议，不选项目 |
+| 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话、右侧活动栏与任务详情、模型/规则/定时任务抽屉、官方渲染的文件预览抽屉、二次确认重置、Worker/旧 Router 展示层隐藏；无项目选择器 | 不定义消息协议，不选项目 |
 | Runtime | `lib/runtime.js` | 批处理、直通、Worker 生命周期、报告、Watchdog、恢复、inbox | 不调模型 |
 | Store | `lib/store.js` | journal 追加、重放、内存索引 | 不做策略 |
 | Filter | `lib/filter.js` | 程序层快路径 | 不调模型 |
@@ -123,6 +123,15 @@
 20. **目标不自动续轮**：原生 objective 只在三种来源推进（到点检查 / Worker 报告 /
     用户指令）；创建或更新目标不产生 trigger、不 followup、不排 0 延迟调度。宿主 goal
     在 Router 会话里被 restrict + guard + disarm，普通会话不变。
+21. **面板里的文件预览复用官方渲染器，但不假装有右侧栏**：面板占着 `main` 槽，
+    `layout.panelInfo.activePanelId` 非空，ui-sidebar-right 的座位整体 `hidden`
+    （`visible = activePanelId === null`），`openResource` 的 `require()` 也拿不到屏上
+    会话。因此插件只在「没有屏上会话」时包装公开的 `openResource`（地址是
+    `dsh-resource://file/…` 才接管），正文直接交给官方 primitives：
+    `CodeBlock`（shiki 高亮 + 行号 + 复制）、`MarkdownText`、图片（`readBytes` 字节 →
+    object URL），读取只走公开的 `remote.workspaceFiles`。PDF/Office/视频面板没有
+    渲染器，给明确提示而不是读成文本；宿主缺 primitives 时同样提示。普通会话里
+    文件链接仍走官方右侧栏预览，行为不变。
 
 ## 4. 事件 intake 算法
 
@@ -493,6 +502,8 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | outbox 有消息但没人收到 | 没部署频道桥 | `outbox` 文件 / HTTP `/outbox` |
 | 两个进程抢状态 | owner pid 检查 | `owner.json`、宿主日志 |
 | journal 有坏行 | 崩溃/手工编辑 | `status` 的 `journalBadLines` |
+| 文件预览提示「没有提供文件读取接口」 | `remote.workspaceFiles` 缺席（api-gateway 没装/还没就绪） | 浏览器控制台的 `ctx.inject(['remote.workspaceFiles'])`；预览抽屉有重试按钮 |
+| 文件预览提示「没有提供官方预览组件」 | 宿主版本太旧，没有 `@deepseek-ai/dsh-client-ui-primitives` seed | 浏览器控制台的 `require` 结果；升级宿主 |
 
 ## 14. 扩展点
 
@@ -570,11 +581,12 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 目标 | `test/objectives.test.mjs` | 创建不唤醒、cadence→schedule、Worker 报告推进、到点检查推进、关闭取消调度、节奏替换、宿主 goal 迁移、journal 回放 |
 | 宿主 goal | `test/host-goals.test.mjs` | restrict 名单、guard 拒绝/放行、pre-execute 兜底、armed 即 disarm、resume 再 disarm、dispose 释放 |
 | 文件链接 | `test/file-link.test.mjs` | 地址解析（session/absolute/盘符/UNC）、无会话才接管、普通会话放行、无接收器回退、读取请求参数 |
+| 文件预览 | `test/file-preview.test.mjs` | 注入面形状（宿主 `WorkspaceFiles`）、`read`/`readBytes` 参数与 `RemoteResult` 拆解、图片后缀→媒体类型、正文交给官方 `CodeBlock`/`MarkdownText`、行号对齐、截断与降级文案、二进制/缺组件提示 |
 | 面板状态 | `test/panel-state.test.mjs` | 可见即已读（+1 与清零同一判定）、离开 3 条→可见归零、心跳过期/换实例/面板关闭计未读、面板可见性=页面可见+布局选中、重挂续接原会话、事件回调不改当前选择 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 232 个用例，全部不需要模型调用。
+共 237 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录

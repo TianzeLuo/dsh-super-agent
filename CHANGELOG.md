@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Changed
+
+- **文件预览改用官方渲染器**（替代上一轮的自绘抽屉）。官方右侧栏预览在插件面板里
+  打不开：面板占着 `main` 槽，`layout.panelInfo.activePanelId` 非空，
+  `dsh-client-ui-sidebar-right` 的座位整体 `hidden: !active`，`openResource` 的
+  `require()` 也拿不到屏上会话；`openResourceIn(sessionId, …)` 只能把 tab 放进隐藏的
+  座位，官方 tab 正文又是 keyed 槽条目、没有对外渲染入口。所以插件保留自己的抽屉壳，
+  正文交给官方 primitives：代码 → `CodeBlock`（shiki 高亮、行号、复制、换行；从
+  第 N 行开始读时补空行让行号对齐文件真实行号），markdown → `MarkdownText`，
+  图片 → `readBytes` 字节转 object URL。PDF/Office/视频明确提示到官方链接查看；
+  读取失败/接口缺失/组件缺失都有文案和重试按钮。读取仍走公开的
+  `remote.workspaceFiles`（`read` 一页文本、`readBytes` 整文件并拆 `RemoteResult`）。
+  删掉自绘的逐行 `<pre>` 渲染（`previewScroll`/`previewPre`/`previewLine*` 样式、
+  行高亮 ref、`targetLine` 状态字段），新代码只 require 一个额外的 seed 模块
+  `@deepseek-ai/dsh-client-ui-primitives`（缺它则显示提示，不影响其它功能）。
+
 ### Added
 
 - **重启恢复**：Worker 会话只存在于宿主内存里，`dsh web` 重启后整批消失、任务被
@@ -46,7 +62,7 @@
   「屏上会话」，官方 `sidebarRight.openResource` 会对会话里的每个文件链接抛
   `sidebarRight: no session surface is mounted`。插件现在在面板挂载期间只包装这一个
   公开方法：没有屏上会话且地址是 `dsh-resource://file/…` 时，解析成「会话 + 路径 +
-  行号」交给面板自带的预览抽屉（读 `remote.workspaceFiles` 一页并按行渲染）；
+  行号」交给面板自带的预览抽屉（读取走 `remote.workspaceFiles`，正文见上一条 Changed）；
   其余情况（普通会话语义、非文件资源、面板已卸载）原样调用官方实现。
   覆盖的工具行路径、`@file` 引用和交付卡片都走同一条 `openResource` 路径。
 

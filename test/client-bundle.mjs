@@ -3,7 +3,8 @@
  *
  * 浏览器半部是 `window.__ModuleLoader__.load({…})` 形式的经典脚本，Node 里没有
  * `window`。这里只铺 bundle 求值需要的最小 DOM/计时器桩，拿到 registration 后用
- * 一个只认识 `react` 的 require 执行 factory，返回它的导出与测试用内部函数。
+ * 一个只认识 `react`（以及调用方显式给的 seed 模块）的 require 执行 factory，
+ * 返回它的导出与测试用内部函数。
  */
 
 import { readFileSync } from 'node:fs'
@@ -12,8 +13,15 @@ import { fileURLToPath } from 'node:url'
 const ROOT = new URL('../', import.meta.url)
 const SOURCE = readFileSync(fileURLToPath(new URL('lib/client.js', ROOT)), 'utf8')
 
-/** 求值 client bundle 并返回它的导出（含 `__internals`）。 */
-export function loadClientBundle() {
+/**
+ * 求值 client bundle 并返回它的导出（含 `__internals`）。
+ *
+ * @param {Record<string, object>} [modules] 除 `react` 之外的 seed 模块；
+ *   例如 `{ '@deepseek-ai/dsh-client-ui-primitives': stub }`。没给的模块 require
+ *   时抛错，和宿主缺 seed 时一样。
+ * @returns {object} bundle 导出。
+ */
+export function loadClientBundle(modules = {}) {
   let registration
   const windowStub = { __ModuleLoader__: { load: (value) => { registration = value } } }
   const React = {
@@ -25,7 +33,9 @@ export function loadClientBundle() {
     useMemo: (fn) => fn(),
   }
   const requireStub = (name) => {
+    if (name === 'react' && Object.prototype.hasOwnProperty.call(modules, 'react')) return modules.react
     if (name === 'react') return React
+    if (Object.prototype.hasOwnProperty.call(modules, name)) return modules[name]
     throw new Error(`unexpected require: ${name}`)
   }
   const run = new Function( // eslint-disable-line no-new-func

@@ -207,16 +207,16 @@ test('installing the bridge twice is a no-op and a missing service is tolerated'
 test('a preview plan becomes a bounded read request for remote.workspaceFiles', () => {
   assert.deepEqual(
     fileReadRequest({ sessionId: 'session-abc', path: 'src/app.js', line: 42 }, 'session-router'),
-    { sessionId: 'session-abc', path: 'src/app.js', range: { offset: 34, limit: 400 }, targetLine: 42 },
+    { sessionId: 'session-abc', path: 'src/app.js', range: { offset: 34, limit: 2000 }, targetLine: 42 },
   )
   assert.deepEqual(
     fileReadRequest({ path: 'src/app.js' }, 'session-router'),
-    { sessionId: 'session-router', path: 'src/app.js', range: { offset: 1, limit: 400 }, targetLine: undefined },
+    { sessionId: 'session-router', path: 'src/app.js', range: { offset: 1, limit: 2000 }, targetLine: undefined },
   )
   // absolute 地址没有会话：用面板的 Router 会话做读取作用域。
   assert.deepEqual(
     fileReadRequest({ scope: 'absolute', path: 'F:/proj/a.ts', line: 2 }, 'session-router'),
-    { sessionId: 'session-router', path: 'F:/proj/a.ts', range: { offset: 1, limit: 400 }, targetLine: 2 },
+    { sessionId: 'session-router', path: 'F:/proj/a.ts', range: { offset: 1, limit: 2000 }, targetLine: 2 },
   )
   assert.equal(fileReadRequest(undefined, 'session-router'), undefined)
   assert.equal(fileReadRequest({ path: 'a.ts' }, ''), undefined)
@@ -245,7 +245,7 @@ test('click → plan → read request is one chain a mock can assert end to end'
   const page = await workspaceFiles.read(request.sessionId, request.path, request.range, controller.signal)
   restore()
 
-  assert.deepEqual(reads, [{ sessionId: 'session-abc', path: 'src/app.js', range: { offset: 34, limit: 400 }, aborted: false }])
+  assert.deepEqual(reads, [{ sessionId: 'session-abc', path: 'src/app.js', range: { offset: 34, limit: 2000 }, aborted: false }])
   assert.equal(page.lines, 2)
   assert.equal(page.eof, true)
   assert.equal(request.targetLine, 42, 'the panel highlights the line the link pointed at')

@@ -27,7 +27,12 @@ test('client bundle is a single classic-script module with the stable id', () =>
   assert.match(client, /id: 'dsh-super-agent'/)
   assert.doesNotMatch(client, /^\s*import\s/m)
   assert.doesNotMatch(client, /^\s*export\s/m)
-  assert.deepEqual([...client.matchAll(/require\('([^']+)'\)/g)].map((match) => match[1]), ['react'])
+  // 只允许宿主的 seed 静态模块：react + 官方 primitives（预览正文的渲染组件）。
+  // 其余一律不走 require（宿主没有该 seed 时会抛，面板不该依赖它们）。
+  assert.deepEqual(
+    [...new Set([...client.matchAll(/require\('([^']+)'\)/g)].map((match) => match[1]))].sort(),
+    ['@deepseek-ai/dsh-client-ui-primitives', 'react'],
+  )
 })
 
 test('client registers the sidebar entry, main panel and session-scoped child', () => {
