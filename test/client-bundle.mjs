@@ -19,17 +19,22 @@ const SOURCE = readFileSync(fileURLToPath(new URL('lib/client.js', ROOT)), 'utf8
  * @param {Record<string, object>} [modules] 除 `react` 之外的 seed 模块；
  *   例如 `{ '@deepseek-ai/dsh-client-ui-primitives': stub }`。没给的模块 require
  *   时抛错，和宿主缺 seed 时一样。
- * @param {{ location?: { search?: string, href?: string }, window?: object }} [env]
+ * @param {{ location?: { search?: string, href?: string }, window?: object, reuseWindow?: boolean }} [env]
  *   `location`/`window` 桩：`?navdebug=1` 这类开关在 bundle 求值时读取，必须在
  *   加载前给。`window` 上已有的字段会被保留（`__SA_NAV_LOG__` 断言用得到）。
  * @returns {object} bundle 导出；`__window` 是本次求值用的 window 桩。
  */
 export function loadClientBundle(modules = {}, env = {}) {
   let registration
-  const windowStub = {
-    ...(env.window ?? {}),
-    __ModuleLoader__: { load: (value) => { registration = value } },
-  }
+  // `reuseWindow: true` 时把调用方的 window 对象**原样**当全局用（同一页面被求值
+  // 两次的场景：单实例标记、守卫注册表这些 window 级槽必须真的共享）。
+  const windowStub = env.reuseWindow === true && env.window !== undefined
+    ? env.window
+    : {
+        ...(env.window ?? {}),
+        __ModuleLoader__: { load: (value) => { registration = value } },
+      }
+  windowStub.__ModuleLoader__ = { load: (value) => { registration = value } }
   const locationStub = env.location ?? { search: '' }
   const React = {
     createElement: () => null,

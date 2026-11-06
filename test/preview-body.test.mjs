@@ -188,3 +188,36 @@ test('真实 hw7.tex：按 Markdown 渲染（含代码围栏）也不抛错', (t
     if (chrome.toolbarLabels.unwrapLabel.length === 0) throw new Error('empty')
   })
 })
+
+test('接口非 ok：转成错误态并带上 code，不再把 undefined 喂给渲染器', async () => {
+  const { __internals: internals } = loadClientBundle({ react: recordingReact() })
+  const face = {
+    read: async () => ({ ok: false, error: { code: 'workspace-file/not-found', message: 'no such file' } }),
+  }
+  const state = await internals.readFilePreview(() => face, { path: 'hw7.tex', sessionId: 's-1' }, 's-1')
+  assert.equal(state.status, 'error')
+  assert.equal(state.code, 'workspace-file/not-found')
+  assert.equal(state.error, 'no such file')
+
+  // 用带占位符的假 t，验证 reason（含 code）真的被填进文案。
+  const t = (key) => (key === 'previewError' ? '读取失败：{reason}' : key)
+  const message = internals.previewMessage(t, state)
+  assert.match(message, /workspace-file\/not-found/, '错误态要带状态码/原因')
+  assert.match(message, /no such file/)
+
+  // 非 ready 状态永远走提示文案，不会调用宿主组件。
+  const node = internals.previewBodyOf(primitivesStub(), t, { kind: 'code', state, path: 'hw7.tex' })
+  assert.equal(node.type, 'div')
+  assert.equal(node.props.children, message)
+})
+
+test('ready 但没有正文（接口形状不对）也走提示，不抛 TypeError', () => {
+  const { __internals: internals } = loadClientBundle({ react: recordingReact() })
+  const node = internals.previewBodyOf(primitivesStub(), (key) => key, {
+    kind: 'code',
+    state: { status: 'ready', text: undefined, path: 'hw7.tex', offset: 1 },
+    path: 'hw7.tex',
+  })
+  assert.equal(node.type, 'div')
+  assert.ok(!('children' in node.props) || typeof node.props.children === 'string' || node.props.children === undefined)
+})

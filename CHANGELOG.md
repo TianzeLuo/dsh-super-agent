@@ -54,6 +54,18 @@
 - **预览从浮层改成面板内的一列**：占 560px（最宽 640px），对话区 `flex:1 1 auto;
   min-width:0` 跟着变窄，不再盖住内容；Esc / ✕ 关闭（停靠列不再点外部关闭）。
 
+### Fixed
+
+- **同一页面跑了两份客户端**（聚合 boot combo + 单独 graph row 各一份）：守卫叠两层、
+  navdebug 订阅两份、away-notify 收到两个 `showSession`，是「面板被切走 / 日志重复」
+  的直接来源。现在用 `window` 上的全局槽做跨闭包单实例：后到者先销毁前一份的安装，
+  守卫按 layout 只包一层，诊断只保一份订阅，away-notify 注册只留一个且注销幂等。
+- **预览接口非 ok 时按成功结构取正文**：`readFilePreview` 现在保留 `RemoteResult.error.code`，
+  错误态显示「code: 原因」；`previewBodyOf` 遇到非字符串正文只出提示，不再把 `undefined`
+  喂给 `CodeBlock`/`MarkdownText`（TypeError 的下游来源）。
+- **navdebug 打印 `Object Error: navdebug`**：改成结构化一行
+  `[super-agent][nav] {"type","source","target","at","detail"}` + 两帧调用点。
+
 ### Added
 
 - **预览宽度对照 + 真实数据截图**：`preview-column-closed-light.png` /
