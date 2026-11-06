@@ -43,6 +43,16 @@
   复现：`node test/manual/repro-panel-yank.mjs --navdebug`；用例
   `test/nav-guard.test.mjs`。
 
+### Changed
+
+- **自动跟随通知默认关**（`localStorage['dsh.super-agent.navFollow']` 写 `on` 才开）。
+  away-notify 在**发通知时**就写下待跳转会话（`host.js:461-465`，TTL 90 秒 `:721`），
+  之后任意一次焦点/可见性恢复都会消费（`client.js:1139-1153`）——这就是「刚打开面板
+  就被切走」「切到的界面没有活动」的机制。页面内无法区分「点通知」与「切焦点」
+  （只有 `showSession(sessionId)` 一条通路，没有来源标记），所以默认只提示不跳：
+  面板顶部给「定位」提示条，顶部新增 **「跟随：关 / 跟随：开」** 按钮
+  （提示条里也有「以后自动跟随」）。开关只影响本面板的自动落点，通知与点击选中面板不受影响。
+
 ### Added
 
 - **导航诊断开关** `?navdebug=1`（默认关闭）：`activePanelId` 变化、实例切换、会话切换
