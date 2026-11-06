@@ -81,8 +81,18 @@ hashchange），而且手势是**一次性令牌**——点开面板那一下不
 `conversation` 已被 ui-conversation 占用（`:20019-20026`）；`uiSession.provide()` 只提供
 数据 hooks/props（`dsh-client-ui-session/lib/client.js:849`）。所以插件面板里只能用宿主
 同一批正文组件（`CodeBlock` / `MarkdownText`），预览做成**面板内的一列**（560px，最宽
-640px）：对话区 `flex:1 1 auto; min-width:0` 跟着变窄，观感与官方三列一致。要真正复用
-官方右栏，需要宿主把 `mounted` 绑到「当前面板 retain 的会话」而不是 `undefined`。
+640px）：对话区 `flex:1 1 auto; min-width:0` 跟着变窄，观感与官方三列一致。
+
+座位归属把这条路彻底堵死：`shell.leading` 归 `dsh-client-ui-sidebar`（`lib/client.js:523`）、
+`rightbar` 归 `dsh-client-ui-sidebar-right`（`:4915`），`main` 里 `conversation` 归
+ui-conversation；唯一可注入的是会话自己的 `main.conversation` 子槽
+（ui-conversation 渲染于 `:17887`），它只能**加**一块 UI 到会话面板里，既替换不了会话、
+也不给我们的 Router 侧栏一个座位。要真正复用官方右栏，需要宿主把 `mounted` 绑到
+「当前面板 retain 的会话」而不是 `undefined`（一行改动，不在我们仓库）。
+
+截图：`docs/screenshots/preview-column-closed-light.png`（预览关：对话区独占全宽）、
+`preview-column-open-light.png`（打开后对话区让位）、`preview-hw7-dark.png`
+（真实 `hw7.tex` 正文，latex 高亮 + 行号）。
 
 点通知回到产生它的实例：面板把 `panelId` / retain 来源 / `showSession` 一起注册给
 `dsh-away-notify`（见它的 `docs/plugin-api.md`「面板点击落点」）。点击后先选中面板，

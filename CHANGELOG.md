@@ -54,6 +54,14 @@
 - **预览从浮层改成面板内的一列**：占 560px（最宽 640px），对话区 `flex:1 1 auto;
   min-width:0` 跟着变窄，不再盖住内容；Esc / ✕ 关闭（停靠列不再点外部关闭）。
 
+### Added
+
+- **预览宽度对照 + 真实数据截图**：`preview-column-closed-light.png` /
+  `preview-column-open-light.png`（预览打开后对话区真正缩宽）、
+  `preview-hw7-dark.png`（真实 `<local>/code/dsa/homework/hw7.tex` 正文）。
+- **真实文件回归**：`test/preview-body.test.mjs` 读真实 `hw7.tex`（缺失则跳过），
+  CodeBlock / Markdown 两条路径都断言宿主读取的字段存在。
+
 ### Changed
 
 - **导航日志加来源标签**（`source`）：`layout.panelInfo` / `layout.selectPanel` /

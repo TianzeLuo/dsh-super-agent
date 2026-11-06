@@ -15,7 +15,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -100,10 +100,11 @@ const SESSIONS = ['重构通知跳转', '文件预览抽屉', '未读判定', '�
  * @param {'light'|'dark'} options.theme 主题。
  * @param {'drawer'|'modal-old'} options.shell 抽屉外壳（新/旧）。
  * @param {boolean} options.closed 截图时抽屉是否已被 Esc 关掉。
- * @param {'code'|'error'} [options.body] 抽屉正文：正常代码 / 渲染错误态。
+ * @param {'code'|'error'|'hw7'} [options.body] 预览正文：正常代码 / 渲染错误态 / 真实 hw7.tex。
+ * @param {boolean} [options.preview] 是否渲染预览列（false = 对照用：对话区独占全宽）。
  * @returns {string} HTML。
  */
-function page({ theme, shell, closed, body = 'code' }) {
+function page({ theme, shell, closed, body = 'code', preview = true }) {
   const tokens = theme === 'light' ? LIGHT : DARK
   const isDrawer = shell === 'drawer'
   // 新外壳：没有遮罩层，抽屉自己贴右侧（`S.drawerPanel`）；旧外壳：`S.backdrop`
@@ -120,7 +121,17 @@ function page({ theme, shell, closed, body = 'code' }) {
               <button type="button" class="icon-button" style="width:auto;padding:0 10px">重试</button>
             </div>`
 
-  const codeLines = CODE.split('\n').map((line, index) => {
+  // 真实数据：用户报错现场就是这类 .tex 文件（`<local>/code/dsa/homework/hw7.tex`）。
+  // 读不到就退回内置样例，截图脚本不能因为别处文件缺失而失败。
+  const HW7_PATH = process.env.HW7 ?? '<local>/code/dsa/homework/hw7.tex'
+  let hw7 = ''
+  try {
+    hw7 = readFileSync(HW7_PATH, 'utf8').split('\n').slice(0, 14).join('\n')
+  } catch {
+    hw7 = CODE
+  }
+  const sample = body === 'hw7' ? hw7 : CODE
+  const codeLines = sample.split('\n').map((line, index) => {
     const text = line.replace(/&/g, '&amp;').replace(/</g, '&lt;')
     return `<span class="ln">${String(index + 1).padStart(3, ' ')}</span>${text || ' '}`
   }).join('\n')
@@ -224,21 +235,22 @@ function page({ theme, shell, closed, body = 'code' }) {
         <div class="msg">预览是面板右侧的一列（560px，最宽 640px）：对话区会跟着变窄，左栏、顶部、输入框都还能看见、还能点。按 <b>Esc</b> 或右上角 ✕ 关闭。</div>
         <div class="composer">输入任务…（这里应当始终可见，不能被遮罩盖住）</div>
       </div>
-      <div class="dismiss-layer" id="layer">
+      ${preview ? '' : '<!-- 对照：预览关闭 -->'}
+      <div class="dismiss-layer" id="layer"${preview ? '' : ' hidden=""'}>
         <div class="sheet" id="sheet" role="dialog" aria-modal="false" aria-label="文件预览">
           <div class="sheet-header">
             <div class="sheet-title">文件预览</div>
             <button type="button" class="icon-button" id="close" aria-label="关闭">✕</button>
           </div>
           <div class="sheet-body">
-            <div class="preview-path"><local>/project/tools/plugin/dsh-super-agent/lib/client.js</div>
+            <div class="preview-path">${body === 'hw7' ? HW7_PATH : '<local>/project/tools/plugin/dsh-super-agent/lib/client.js'}</div>
             ${body === 'error'
               ? crashNote
               : `<div class="md-code-block" data-line-numbers="true">
-              <div class="banner" data-code-block-banner="true"><span>js</span><span>复制</span></div>
+              <div class="banner" data-code-block-banner="true"><span>${body === 'hw7' ? 'latex' : 'js'}</span><span>复制</span></div>
               <pre><code>${codeLines}</code></pre>
             </div>`}
-            <div class="preview-note">只读预览 · 第 1–13 行 · 共 4759 行</div>
+            <div class="preview-note">${body === 'hw7' ? '只读预览 · 第 1–14 行 · 共 342 行' : '只读预览 · 第 1–13 行 · 共 4759 行'}</div>
             <p class="hint">Esc 关闭 · 正文独立滚动 · 对话区让位</p>
           </div>
           <div class="sheet-footer"><button type="button" class="icon-button" style="width:auto;padding:0 10px">重试</button></div>
@@ -276,10 +288,21 @@ const shots = [
   { file: 'preview-drawer-esc-light.png', theme: 'light', shell: 'drawer', closed: true },
   { file: 'preview-drawer-old-mask-dark.png', theme: 'dark', shell: 'modal-old', closed: false },
   { file: 'preview-drawer-error-light.png', theme: 'light', shell: 'drawer', closed: false, body: 'error' },
+  // 宽度对照：预览关闭时对话区独占；打开后对话区让位给右侧列。
+  { file: 'preview-column-closed-light.png', theme: 'light', shell: 'drawer', closed: false, preview: false },
+  { file: 'preview-column-open-light.png', theme: 'light', shell: 'drawer', closed: false },
+  // 真实数据：hw7.tex 的正文（LaTeX 语言标签 + 行号），验证渲染不再抛错。
+  { file: 'preview-hw7-dark.png', theme: 'dark', shell: 'drawer', closed: false, body: 'hw7' },
 ]
 
 for (const shot of shots) {
-  const html = page({ theme: shot.theme, shell: shot.shell, closed: shot.closed === true, body: shot.body })
+  const html = page({
+    theme: shot.theme,
+    shell: shot.shell,
+    closed: shot.closed === true,
+    body: shot.body,
+    preview: shot.preview !== false,
+  })
   // 页面放在 docs/screenshots/ 里：Chrome 读得到，也能作为截图的可复现来源留着。
   const htmlPath = join(OUT, shot.file.replace(/\.png$/, '.html'))
   writeFileSync(htmlPath, html, 'utf8')
