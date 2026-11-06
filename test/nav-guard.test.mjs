@@ -85,12 +85,13 @@ test('用户手势（点击/按键/前进后退）之内的切换照常放行', 
   })
 
   for (const type of ['pointerdown', 'mousedown', 'keydown', 'popstate', 'hashchange']) {
+    // 每种手势都当成「另一次点击」（真实里不会 10ms 内连发五种），步长要大于
+    // 同一次点击的合并窗口（350ms）。
+    clock += 400
     doc.fire(type)
-    clock += 10
     assert.equal(layout.selectPanel(null), undefined, `${type} 之后应当放行`)
     assert.deepEqual(layout.calls.at(-1), null)
     layout.selectPanel('super-agent') // 复位
-    clock += 10
   }
   assert.equal(layout.calls.filter((id) => id === null).length, 5)
   guard()
@@ -109,18 +110,23 @@ test('手势是一次性令牌：点开面板那一下不给随后的自动关�
     isRegistered: () => true,
   })
 
-  // 用户点左栏入口：手势被这次「打开」消费掉
+  // 用户点左栏入口（pointerdown + 同一次点击的 mousedown）→ 打开面板，手势被消费
   doc.fire('pointerdown')
   clock += 20
   assert.equal(layout.selectPanel('super-agent'), undefined)
   assert.equal(layout.state.activePanelId, 'super-agent')
+  doc.fire('mousedown') // 同一次点击的第二个事件，不能重新上膛
+  clock += 5
+  assert.equal(layout.selectPanel(null), false, 'pointerdown+mousedown 属同一次点击，只算一次手势')
+  assert.equal(layout.state.activePanelId, 'super-agent')
 
-  // 300ms 后宿主自动关面板（注册表抖动）：仍然要拦，不能因为刚才点过就放行
+  // 300ms 后宿主自动关面板（注册表抖动）：仍然要拦
   clock += 300
   assert.equal(layout.selectPanel(null), false, '打开面板的手势不能被随后的自动关闭复用')
   assert.equal(layout.state.activePanelId, 'super-agent')
 
-  // 用户真的再点一下：放行
+  // 用户真的再点一下（另一次点击）：放行
+  clock += 600
   doc.fire('pointerdown')
   clock += 20
   assert.equal(layout.selectPanel(null), undefined)
@@ -259,4 +265,20 @@ test('冻结的 layout / 缺失的 layout 都不会让插件崩', () => {
     dispose()
   })
   assert.doesNotThrow(() => internals.installNavGuard({}, { layout: undefined, document: undefined })())
+})
+
+test('同一个 layout 只包一层（ctx.inject 重复回调也不会叠包装）', () => {
+  const { __internals: internals } = loadClientBundle()
+  const layout = fakeLayout('super-agent')
+  const doc = fakeDocument()
+  const original = layout.selectPanel
+  const first = internals.installNavGuard({}, { layout, document: doc, now: () => 1_000, storage: { getItem: () => null }, isRegistered: () => true })
+  const second = internals.installNavGuard({}, { layout, document: doc, now: () => 1_000, storage: { getItem: () => null }, isRegistered: () => true })
+  assert.equal(doc.count(), 5, '第二层不再挂监听')
+  assert.equal(layout.selectPanel(null), false, '只有一层照样拦')
+  second()
+  assert.equal(layout.selectPanel(null), false, '一次解绑不会把守卫拆掉')
+  first()
+  assert.equal(layout.selectPanel, original, '真正解绑后恢复原方法')
+  assert.equal(doc.count(), 0)
 })
