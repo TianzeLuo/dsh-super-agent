@@ -150,7 +150,7 @@ test('面板卸载（插件卸载/热重载）时调用注册返回的注销函�
   assertRegistration(panels.released[0], { panelId: 'super-agent', sources: ['superAgentUi'] })
 })
 
-test('重复 apply（第二份实例）接管 awayNotifyPanels 注册，且注销幂等', () => {
+test('重复 apply（第二份实例）直接退出，不重复注册；第一份卸载后槽位释放', () => {
   const first = makePanels()
   const second = makePanels()
   const firstCtx = makeCtx({ panels: first.service })
@@ -159,14 +159,20 @@ test('重复 apply（第二份实例）接管 awayNotifyPanels 注册，且注�
 
   exports.apply(firstCtx)
   exports.apply(secondCtx)
-  assert.equal(first.calls.length, 1)
-  assert.equal(second.calls.length, 1)
-  assert.equal(first.released.length, 1, '第二份实例接管时先注销第一份（单实例约束）')
+  assert.equal(first.calls.length, 1, '第一份照常注册')
+  assert.equal(second.calls.length, 0, '第二份直接退出，不注册 away-notify')
+  assert.equal(first.released.length, 0, '退出时不销毁第一份的安装')
+
   firstCtx.dispose()
-  assert.equal(first.released.length, 1, '注销幂等：不会把第一份注销两次')
-  assert.equal(second.released.length, 0, '注销自己那份，不能顺手撤掉别人的')
-  secondCtx.dispose()
-  assert.equal(second.released.length, 1)
+  assert.equal(first.released.length, 1, '第一份卸载时注销自己那份')
+
+  // 槽位释放后新的 apply 可以重新注册（HMR 正常拆掉旧 fiber 的路径）。
+  const third = makePanels()
+  const thirdCtx = makeCtx({ panels: third.service })
+  exports.apply(thirdCtx)
+  assert.equal(third.calls.length, 1)
+  thirdCtx.dispose()
+  assert.equal(third.released.length, 1)
 })
 
 test('awayNotifyPanels 不存在（没装 away-notify）时 apply 不抛错、也不注册', () => {

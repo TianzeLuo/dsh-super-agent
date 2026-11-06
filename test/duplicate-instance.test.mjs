@@ -1,10 +1,13 @@
 /**
- * duplicate-instance.test.mjs — 同一页面把 client bundle 求值两次（宿主可能把同一个包
- * 同时放进聚合 boot combo 与单独的 graph row，见 `dsh-client-modules` 的
- * `buildCombo` / `graphRow`）时，**运行时只能注册一份**。
+ * duplicate-instance.test.mjs — 同一页面把 client bundle 求值两次时，**运行时只能注册
+ * 一份**。两次求值的真实来源：启动时的聚合 boot combo，加上 `dsh-client-hmr` 对
+ * `lib/client.js` 的 500ms stat 轮询——mtime/size 一变就 `clientModules.rebuilt(id)`，
+ * 浏览器改用这条行的 one-resource combo（`plugins/??dsh-super-agent/client.js&rev=…`）
+ * 重新求值（宿主正常会先拆掉旧 fiber，这里是兜底）。
  *
  * 每份求值都有自己的模块闭包，所以模块级 WeakMap 挡不住重复；约束必须落在
- * `window` 的全局槽上：单实例标记、守卫注册表、navdebug 注册表。
+ * `window` 的全局槽上：单实例标记（先到者持有，后到者退出）、守卫注册表、
+ * navdebug 注册表。
  */
 
 import { test } from 'node:test'
@@ -39,7 +42,7 @@ function fakeLayout(activePanelId = null) {
   return layout
 }
 
-test('两份 client 求值共用同一 layout：守卫只包一层，第二份接管第一份', () => {
+test('两份 client 求值共用同一 layout：守卫只包一层，第二份复用第一份的还原句柄', () => {
   const { scope, first, second } = twoCopies()
   const layout = fakeLayout()
 
@@ -99,24 +102,23 @@ test('两份 client 求值：navdebug 只有一份订阅（前一份被拆掉）
   assert.equal(panelEntries[0].source, 'layout.panelInfo')
 })
 
-test('单实例标记：第二份 claim 销毁第一份，release 只让出自己的槽位', () => {
-  const { scope, first } = twoCopies()
+test('单实例标记：第二份 claim 直接退出（undefined），不销毁、不接管第一份', () => {
+  const { scope, first, second } = twoCopies()
   const instance = first.__internals.claimInstance()
-
-  let disposed = 0
-  instance.onDispose(() => { disposed += 1 })
   const token = scope[first.__internals.INSTANCE_KEY]
-  assert.equal(typeof token.dispose, 'function')
+  assert.equal(token, instance, '先到者持有全局槽')
 
-  const instance2 = first.__internals.claimInstance()
-  assert.equal(disposed, 1, '第二份接管时销毁第一份的安装')
-  const token2 = scope[first.__internals.INSTANCE_KEY]
-  assert.notEqual(token2, token)
+  const secondInstance = second.__internals.claimInstance()
+  assert.equal(secondInstance, undefined, '后到者拿不到令牌（apply 里据此直接退出）')
+  assert.equal(scope[second.__internals.INSTANCE_KEY], token, '第一份的令牌不受影响')
 
   instance.release()
-  assert.equal(scope[first.__internals.INSTANCE_KEY], token2, '旧实例 release 不能删掉新实例')
-  instance2.release()
-  assert.equal(scope[first.__internals.INSTANCE_KEY], undefined)
+  assert.equal(scope[first.__internals.INSTANCE_KEY], undefined, '卸载时让出槽位')
+
+  // 让出之后新的求值可以重新持有（HMR 正常拆掉旧 fiber 的路径）。
+  const third = second.__internals.claimInstance()
+  assert.notEqual(third, undefined)
+  assert.equal(scope[second.__internals.INSTANCE_KEY], third)
 })
 
 test('导航日志是结构化一行：type/source/target 在 JSON 里，栈是短字符串', () => {
