@@ -195,11 +195,24 @@ Worker 默认隔离；同一项目里的连续工作可以复用已有上下文�
 ```
 
 - 新任务复用同一个 Worker Session，保留之前的对话、工具状态和项目 cwd；
-- 只有源任务处于 `idle` / `blocked`、且 Worker 没有其他 `starting`/`working`
-  任务时才允许；
+- 只有源任务处于 `idle` / `blocked` / `resumable`、且 Worker 没有其他
+  `starting`/`working` 任务时才允许；
 - 新任务必须使用同一 cwd/project；
 - 需要独立并行或跨项目时不要复用，直接创建新 Worker；
 - 旧任务保持为独立活动记录；关闭其中一个不会掐掉仍被其他任务共享的 Worker。
+
+### 重启之后
+
+`dsh web` 重启后 Worker 会话从内存里消失，任务注册表（journal）还在。启动时插件
+会对每条非 closed 任务尝试 `sessionController.resolveAgent()` 把会话装回内存：
+
+| 结果 | 状态 | 怎么继续 |
+| --- | --- | --- |
+| 会话装回来了 | `resumable` | `reuse_task_id` 续同一会话（上下文完整，被打断那一轮不重放） |
+| 会话装不回来 | `interrupted` | `reuse_task_id` 用原 brief 起新 Worker（继承项目/模型/目标/线程，记 `resumedFrom`），或 close |
+
+`interrupted` 取代了重启路径上的 `lost`；`lost` 只留给「跑着的时候 Worker 会话被
+宿主回收」。`superagent_status detail=full` 里能看到这两种状态和每条任务的 brief。
 
 Worker 的最终 assistant 消息仍是报告，以 trigger 回到 Router。
 

@@ -314,6 +314,7 @@ export function setupRuntime(options = {}) {
     schedule,
     agreementsPath: options.agreementsPath ?? join(project.root, '.dsh', 'super-agent.agreements.json'),
     getAgent: (id) => children.get(id),
+    resumeWorker: options.resumeWorker,
     logger: { warn: () => undefined, info: () => undefined },
     timers,
   })

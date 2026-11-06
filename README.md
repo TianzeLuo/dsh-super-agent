@@ -95,8 +95,22 @@ Router 可在 `superagent_dispatch` 里传 `reuse_task_id`，让新任务复用�
 }
 ```
 
-源任务必须是 `idle`/`blocked`，目标 cwd/project 必须一致，且 Worker 当前没有其他
-执行中任务。需要独立并行时不要复用。细节见 [docs/usage.md](docs/usage.md)。
+源任务必须是 `idle`/`blocked`/`resumable`，目标 cwd/project 必须一致，且 Worker
+当前没有其他执行中任务。需要独立并行时不要复用。细节见 [docs/usage.md](docs/usage.md)。
+
+### 重启后继续
+
+任务注册表（id、title、brief、cwd/project、workerSessionId、状态、objective、模型、
+时间戳）就在 journal 里，`dsh web` 重启后照样读回来。Worker 会话本身存在 DSH 的
+会话库里（`~/.dsh/sessions/<project>/<sessionId>/`），启动时会试着用
+`sessionController.resolveAgent()` 把每条还需要的会话装回内存：
+
+- `resumable`：会话救回来了，上下文完整、当前空闲。用 `reuse_task_id` 接着做。
+  被打断的那一轮 turn 不会重放（做不到，也不该假装做到）。
+- `interrupted`：会话救不回来。任务与 brief 都还在，`reuse_task_id` 会用它起一个
+  新 Worker（继承项目/模型/目标/线程，记 `resumedFrom` 谱系），或直接 close。
+
+`superagent_status` 能看到这两种状态；它们在 UI 活动列表里也有独立标签。
 
 ## 配置
 

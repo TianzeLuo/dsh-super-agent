@@ -4,6 +4,21 @@
 
 ### Added
 
+- **重启恢复**：Worker 会话只存在于宿主内存里，`dsh web` 重启后整批消失、任务被
+  判 `lost`。现在 `start()` 会异步跑一次恢复：任务注册表本来就在 journal 里
+  （`task.created/updated` 带 id/title/brief/cwd/workerSessionId/status/objective/
+  模型/时间戳），重启后读回；对每条还需要的任务调用宿主
+  `sessionController.resolveAgent(sessionId)`（`lib/index.js` 的 `resumeWorker` 桥，
+  runtime 不认识任何 `@deepseek-ai/*` 包）把磁盘上的会话装回内存。救回来 → 标
+  `resumable`（上下文完整、可 `reuse_task_id` 继续）；救不回来 → 标 `interrupted`
+  （新状态，取代重启路径上的 `lost`），保留 brief 供 `reuse_task_id` 起新 Worker。
+  `lib/recovery.js` 是纯判定（`planRecovery`/`resumedPatch`/`interruptedPatch`），
+  runtime 只做 IO。**不重放被打断的那一轮 turn**（做不到，也不假装做到）。旧 journal
+  没有这些字段时按默认值读，无迁移；`lost` 仍保留给「跑着的时候会话被宿主回收」。
+- `superagent_dispatch` 的 `reuse_task_id` 现在也接受 `resumable`（续同一会话）与
+  `interrupted`/`lost`（起新 Worker，继承项目/模型/目标/线程并记 `resumedFrom`）；
+  `superagent_status detail=full` 额外给出每条任务的 brief，方便直接重新派工。
+
 - **composer 状态徽标**：注册 `conversation.input.left`（会话级 list 槽），在聊天输入区
   左端显示「运行中 N · 未读 M」。计数复用 `/api/super-agent/ui/state`（`activeWorkers`
   与 `unreadTotal`），没有新协议、没有额外端点；两项都为 0 时不渲染、不占位。点击回到
