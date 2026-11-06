@@ -33,6 +33,8 @@ Super-agent Workspace，不需要先选项目。
 - **定时唤醒**：一次/每日/每周/Cron，到点唤醒 Router 再决定是否派活。
 - **原生目标**：目标 + 里程碑 + 检查节奏；创建/更新不唤醒，不自动续轮。
 - **事件与审计**：Trigger 队列合批；journal 只追加；Worker 会话不进侧栏。
+- **审批阻塞可见**：Worker 等权限时任务变 `blocked-approval`，Router 收到 trigger，
+  面板显示“等待审批”，60 秒未解决由 watchdog 升级；不自动放行。
 - **通知**：任务完成弹系统通知（需 `dsh-away-notify`），点击落回面板对应实例/会话。
 - **输入区徽标**：`运行中 N / 未读 M`，无任务自动消失，点击回面板。
 
@@ -51,5 +53,6 @@ Super-agent Workspace，不需要先选项目。
 ## 文档
 
 - [使用与配置](docs/usage.md) · [架构与设计](docs/design.md)
+- [审批阻塞设计](docs/approval.md)
 - [开发](docs/development.md) · [测试](docs/testing.md) · [排障](docs/troubleshooting.md)
 - [变更记录](CHANGELOG.md)
