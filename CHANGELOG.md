@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **刷新后仍被切到另一个已有会话**：away-notify 的 pendingFocus 走
+  `uiWorkspace.openSession → replaceMain`，绕过 `selectPanel` 守卫，会话在
+  `replaceMain` 里就换掉了。现在守卫同时包一层会话打开器（`uiWorkspace.openSession`
+  与 `sessions.open`）：无手势窗口（1.5s）的跨会话跳转一律拦下，降级为面板内
+  「定位」提示条；启动/首次导航、目标即当前会话、`authorizeNavigation()` 授权的
+  自有导航放行。
+
 - **P0：点文件链接后整屏变黑、只能刷新**。预览以前用共享的「弹层」外壳：一层
   `position: absolute; inset: 0` 的遮罩铺满面板、盖在面板内容之上（`S.backdrop`，
   `background: T.mask`）。面板占的就是宿主整个主区域，所以遮罩一上就是「整个界面

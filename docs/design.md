@@ -161,6 +161,10 @@
     「占一列、内容缩宽」同观感。官方右栏在插件面板里用不了（`ui-sidebar-right` 在
     `activePanelId !== null` 时整体停用、`openResource` 抛 `no session surface is mounted`），
     宿主也没有 per-session surface 接口，所以正文改用官方 `CodeBlock` / `MarkdownText`。
+31. **会话跳转也要守卫**：`uiWorkspace.openSession → replaceMain` 先换会话、最后才
+    `selectPanel(null)`，只守 `selectPanel` 等于没守。会话打开器必须一起包：无手势
+    （1.5s 窗口）的跨会话跳转拦下，降级为面板内「定位」提示；启动导航、目标即当前
+    会话、以及显式 `authorizeNavigation()` 放行。
 29. **页面级单实例**：客户端可能被求值两次，所有「装一次」的东西（守卫包装、诊断订阅、
     away-notify 注册）都必须用 `window` 全局槽幂等，模块级 WeakMap 只在单次求值内有效。
 30. **错误态优先于结构假设**：接口返回非 ok 时只渲染错误文案（带 code），绝不把
@@ -639,11 +643,12 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 面板守卫 | `test/nav-guard.test.mjs` | 无手势的自动切走被拦（三条宿主路径）、有手势放行、手势一次性（点开面板不替随后的自动关闭背书）、打开本面板/面板未激活/条目消失时放行、直接写 store 时条目还在就恢复、解绑恢复原方法并移除监听、开关关闭与冻结服务不崩 |
 | 预览正文 props | `test/preview-body.test.mjs` | MarkdownText 收到 labels.code.toolbarLabels、CodeBlock 收到 toolbarLabels、行号偏移补空行、中英文词典都补齐、真实 hw7.tex（缺失跳过）两条路径都不抛错 |
 | 单实例/重复求值 | `test/duplicate-instance.test.mjs` | 两份求值共用 window：守卫只包一层、诊断只保一份订阅、单实例标记接管与释放、日志结构化 |
+| 会话跳转守卫 | `test/nav-guard.test.mjs` | 无手势 openSession 被拦并排队提示、点击后放行、启动/同会话放行、还原换回原函数、显式授权放行 |
 | 面板状态 | `test/panel-state.test.mjs` | 可见即已读（+1 与清零同一判定）、离开 3 条→可见归零、心跳过期/换实例/面板关闭计未读、面板可见性=页面可见+布局选中、重挂续接原会话、事件回调不改当前选择 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 279 个用例，全部不需要模型调用。
+共 285 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
