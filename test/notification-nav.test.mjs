@@ -191,7 +191,7 @@ test('navdebug 的来源标签能区分 away-notify / layout 服务 / 我们自�
     layout,
     document: doc,
     now: () => 1_000,
-    storage: { getItem: () => null },
+    storage: { getItem: () => 'on' },
     isRegistered: () => true,
   })
   layout.selectPanel(null)

@@ -16,6 +16,19 @@
 
 ### Fixed
 
+- **根因：worker 会话触发 away-notify 通知 → 面板被关/界面切到 worker**。worker 是普通
+  Session（`SessionHeader.origin` 只允许 `'subagent'`，worker 没有该标记），away-notify
+  会在它的 `turn/end` 弹通知并写 `pendingFocus`；用户回到前台时 away-notify 原生消费
+  pendingFocus（`switchTo → replaceMain → selectPanel(null)`），于是关掉本面板、跳到没有
+  用户可读内容的 worker 会话。创建方现在在创建/恢复 worker 时调用
+  `awayNotify.markInternal(id, 'super-agent-worker')`（`lib/internal-sessions.js`），
+  关闭/归档时释放；away-notify 的 `rootsOnly` 判定按「内部会话」静默，不再产生通知与
+  pendingFocus。回归：`test/internal-sessions.test.mjs`、`test/plugin.test.mjs`
+  （worker 创建登记/关闭释放/服务晚到补登记）。
+- **导航守卫改为默认关，恢复 away-notify 原生行为**：系统通知点击在页面里没有指针
+  事件，「无手势就拦」的启发式会误伤正常回跳（点通知不跳）。现在默认完全放行，只有
+  `localStorage['dsh.super-agent.navGuard']='on'` 才启用（诊断用）；默认关时还会主动
+  拆掉上一版默认开启时留在 `window` 上的守卫（HMR 后立即生效）。单实例约束保留。
 - **切标签页回来又被切走（放行判据误伤）**：`hidden→visible`（0.4–20s）与「点系统通知」
   在页面里不可区分，已删除该启发式。现在只认两条确定性信号：页面内手势、
   `?dshAwayNotifyFocus=<id>`（绑 sessionId、一次性）。系统通知点击改为**不自动跳**：

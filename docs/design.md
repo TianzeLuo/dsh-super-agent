@@ -148,31 +148,30 @@
     （`RenderBoundary`），官方 `CodeBlock`/`MarkdownText` 或我们自己的渲染抛错时，
     只把那一块换成错误态（消息 + 重试 + console 留栈），面板其余部分与宿主界面继续
     可用。React 在无边界时抛错会卸载整棵树——那正是「只能刷新」的来源。
-25. **面板只在用户手势下被切走**：宿主有三条不经过点击就能关掉面板的路径
-    （`ui-layout` 的 `retainMainPanels`、`ui-workspace` 的 `replaceMain(…,'reveal')`
-    与 `clearMain()`）。插件在本面板激活期间包装 `layout.selectPanel`：切走必须带
-    最近 1.5 秒内的真实手势，且手势是**一次性令牌**（点开面板那一下不授权随后的自动
-    关闭）；被拦的调用记 `nav.blocked` 并带调用栈。绕过 `selectPanel` 直接写 store 的
-    路径由 `panelInfo` 订阅兜住：等一个 tick，我们的 main 条目还在就恢复（`nav.restored`），
-    条目没了就放行——不硬撑一个不存在的面板。打开本面板、用户自己的导航（点会话、
-    Conversation、快捷键、浏览器前进后退）都不受影响。
+25. **「面板被切走」的根因在通知侧，不在导航**：worker 是普通 Session（header 上的
+    `origin: 'subagent'` / `delegationDepth` 两个内部标记它都没有），away-notify 会为
+    它的 `turn/end` 弹通知并写 `pendingFocus`；用户回到前台时 away-notify 原生消费
+    `pendingFocus`：`switchTo → replaceMain → selectPanel(null)` —— 面板被关、界面换到
+    worker 会话。修复是创建方把 worker 登记成内部会话（`awayNotify.markInternal`），
+    让通知在源头就不产生，而不是在导航层猜「这次切换是不是用户点的」。
 26. **预览是面板里的一列，不是浮层**：`S.drawerPanel` 是 `flex: 0 0 auto; width 560
     (max 640)` 的 flex 子项，对话区 `flex: 1 1 auto; min-width: 0` 让位——和官方右栏
     「占一列、内容缩宽」同观感。官方右栏在插件面板里用不了（`ui-sidebar-right` 在
     `activePanelId !== null` 时整体停用、`openResource` 抛 `no session surface is mounted`），
     宿主也没有 per-session surface 接口，所以正文改用官方 `CodeBlock` / `MarkdownText`。
-33. **守卫必须防「静默消失」**：非属主实例的还原是空操作；每次可见性变化自愈
-    `selectPanel` 包装。面板关闭只有 `clearMain`/`replaceMain` 两处 `selectPanel(null)`，
-    前端没有 URL 路由导航。
-32. **「点了通知」只认确定性信号**：系统通知点击在页面里**没有任何信号**（协议
-    脚本不回连服务器，presence 无点击记录），所以不自动跳；只有页面内手势与
-    `?dshAwayNotifyFocus=`（绑 sessionId、一次性）能放行。`visibilitychange` 只用于
-    自愈守卫，绝不当作点击信号（切标签与点通知不可区分）。被拦后把面板切到前台并
-    给「定位」提示条。
-31. **会话跳转也要守卫**：`uiWorkspace.openSession → replaceMain` 先换会话、最后才
-    `selectPanel(null)`，只守 `selectPanel` 等于没守。会话打开器必须一起包：无手势
-    （1.5s 窗口）的跨会话跳转拦下，降级为面板内「定位」提示；启动导航、目标即当前
-    会话、以及显式 `authorizeNavigation()` 放行。
+33. **导航守卫默认关**：`installNavGuard` 默认直接放行（`localStorage` 缺省/`off`），
+    只有显式写 `on` 才包装 `selectPanel` 与会话打开器；默认放行时必须主动拆掉上一版
+    留在 `window` 注册表里的守卫，否则 HMR 后「默认关」只是一句话。守卫开启时仍保留
+    属主约束与可见性自愈（非属主还原是空操作），但它只是诊断工具，不是默认行为。
+32. **系统通知点击交给 away-notify 原生行为**：页面里没有通知点击信号（协议脚本不回连
+    server，presence 无点击记录），任何「无手势就拦」的启发式都会误伤正常回跳。默认
+    不再拦截；普通会话的通知照常跳到该会话，被本面板 retain 的会话由 away-notify 激活
+    面板（`awayNotifyPanels` 注册）。
+31. **worker 会话必须由创建方声明为内部会话**：DSH 没有给普通 Session 留「内部/系统」
+    标记（`SessionHeader.origin` 只允许 `'subagent'`，见 `dsh-session/lib/index.js:1053`），
+    而跨项目 worker 必须用 `sessionController.create({ cwd })` 建普通会话。因此
+    `lib/internal-sessions.js` 在创建/恢复时调用 `markInternal`，关闭/归档时释放；away-notify
+    未装或旧版没有该方法时静默降级（标题前缀仍可兜底）。
 29. **页面级单实例**：客户端可能被求值两次，所有「装一次」的东西（守卫包装、诊断订阅、
     away-notify 注册）都必须用 `window` 全局槽幂等，模块级 WeakMap 只在单次求值内有效。
 30. **错误态优先于结构假设**：接口返回非 ok 时只渲染错误文案（带 code），绝不把
@@ -564,10 +563,10 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | journal 有坏行 | 崩溃/手工编辑 | `status` 的 `journalBadLines` |
 | 文件预览提示「没有提供文件读取接口」 | `remote.workspaceFiles` 缺席（api-gateway 没装/还没就绪） | 浏览器控制台的 `ctx.inject(['remote.workspaceFiles'])`；预览抽屉有重试按钮 |
 | 文件预览提示「没有提供官方预览组件」 | 宿主版本太旧，没有 `@deepseek-ai/dsh-client-ui-primitives` seed | 浏览器控制台的 `require` 结果；升级宿主 |
-| 刚打开面板就被切走 | 宿主的自动关闭路径（注册表抖动 / openSession 回退 / 归档清空）在无手势时触发 | `?navdebug=1` 后看 `__SA_NAV_LOG__` 的 `nav.close`（带关闭栈）与 `nav.restored`；守卫默认开，`localStorage['dsh.super-agent.navGuard']='off'` 可关 |
+| 刚打开面板就被切走 | 以前是 worker 会话弹通知 → away-notify 的 pendingFocus 在焦点恢复时切会话；现在源头已抑制 | 先确认通知正文不是 `Super-agent worker · …`；`__SA_NAV_LOG__` 里若是 `away-notify.showSession` 说明目标是本面板的 Router，`nav.blocked` 只会在手动把 `localStorage['dsh.super-agent.navGuard']='on'` 后出现 |
 | 点文件后整屏变黑 / 点不动 | 预览用了铺满面板的遮罩外壳，或渲染期抛错卸载了整棵树 | `docs/screenshots/preview-drawer-*.png`；真机上按 `Esc` 应能关闭，控制台看 `[super-agent] render failed` |
 | 点通知不跳转 / 跳错实例 | 没注册 `showSession`；或 `/ui/state` 里没有该会话的 Router（已关闭/归档） | 地址栏 `?navdebug=1` 后看 `__SA_NAV_LOG__` 的 `reveal.*`；提示条会写明「认不出实例」 |
-| 回到窗口时被切到别的会话 | away-notify 的待跳转会话在发通知时就写入、任意焦点恢复时消费（90 秒有效） | 自动跟随默认关：只提示不跳，点「定位」再跳；顶部「跟随：关」可打开；`__SA_NAV_LOG__` 里 `panel` 事件带调用栈 |
+| 回到窗口时被切到别的会话 | away-notify 的待跳转会话在发通知时就写入、任意焦点恢复时消费（90 秒有效）；worker 会话本不该产生它 | worker 已由创建方 `markInternal` 登记为内部会话，不再弹通知/写 pendingFocus；普通会话的回跳是按 away-notify 原生语义走 |
 
 ## 14. 扩展点
 
@@ -649,15 +648,15 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 通知点击落点 | `test/notification-nav.test.mjs` | 点击 → 面板/实例/会话三者都被请求、已在目标仍定位、状态读不到也不中止、会话→实例只信 `routers`、挂载前排队取一次即清空、`?navdebug=1` 才有订阅与 `__SA_NAV_LOG__`（关闭零副作用）、自动跟随默认关、显式 on 才跟随、开关持久化、navdebug 来源标签（away-notify/layout/守卫） |
 | 预览抽屉 | `test/preview-drawer.test.mjs` | 预览列样式（右侧、无 `inset`、无遮罩、可拖拽条、标签栏横向滚动）、`PreviewColumn` 复用 `drawer` 变体、头部标签数/高亮/每标签关闭按钮、每个标签一份常驻正文、点外面不关（加标签）、`Esc` 交给自定义行为、输入框里的 `Esc` 不关、下拉菜单算「里面」、错误边界接住异常、错误摘要不塞整段栈、面板槽位整体有边界 |
 | 预览多标签 | `test/preview-tabs.test.mjs` | 新文件追加并激活（不覆盖已有）、同文件重复点击只激活、关闭当前标签激活右邻/最后一个收起、关闭非活动标签不动当前、列宽 640/480、给对话留 320、拖拽上下限、标签名/图标映射 |
-| 面板守卫 | `test/nav-guard.test.mjs` | 无手势的自动切走被拦（三条宿主路径）、有手势放行、手势一次性（点开面板不替随后的自动关闭背书）、打开本面板/面板未激活/条目消失时放行、直接写 store 时条目还在就恢复、解绑恢复原方法并移除监听、开关关闭与冻结服务不崩 |
+| 面板守卫（默认关） | `test/nav-guard.test.mjs` | 缺省/`off` 不包装（原生放行）、显式 `on` 才拦（三条宿主路径）、有手势放行、手势一次性、直接写 store 时条目还在就恢复、默认关时拆掉上一版留在 window 上的守卫、解绑恢复原方法并移除监听、开关关闭与冻结服务不崩 |
 | 预览正文 props | `test/preview-body.test.mjs` | MarkdownText 收到 labels.code.toolbarLabels、CodeBlock 收到 toolbarLabels、行号偏移补空行、中英文词典都补齐、真实 hw7.tex（缺失跳过）两条路径都不抛错 |
 | 单实例/重复求值 | `test/duplicate-instance.test.mjs` | 两份求值共用 window：守卫只包一层、诊断只保一份订阅、单实例标记（第二份退出）与释放、日志结构化 |
-| 会话跳转守卫 | `test/nav-guard.test.mjs` | 无手势 openSession 被拦并排队提示、点击后放行、启动/同会话放行、还原换回原函数、显式授权放行 |
+| 会话跳转守卫（默认关） | `test/nav-guard.test.mjs` | 显式 `on` 时无手势 openSession 被拦并排队提示、点击后放行、启动/同会话放行、还原换回原函数、显式授权放行 |
 | 面板状态 | `test/panel-state.test.mjs` | 可见即已读（+1 与清零同一判定）、离开 3 条→可见归零、心跳过期/换实例/面板关闭计未读、面板可见性=页面可见+布局选中、重挂续接原会话、事件回调不改当前选择 |
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 311 个用例，全部不需要模型调用。
+共 313 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
