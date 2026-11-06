@@ -87,11 +87,15 @@
 12. **事件正文默认脱敏**：`redact: true` 时，常见 key/token 在进入 journal 前被替换。
 13. **失败不连坐**：配置错误、目录不可写、端口被占、服务缺失，都只让插件对
     本次会话保持关闭，不影响 `agent/created`。
-14. **Worker 的通知抑制由创建方登记**：worker 是普通 Session，`dsh-away-notify`
-    只能按标题前缀兜底识别，用户一改名就失效。因此创建 worker 时调
-    `awayNotify.markInternal(sessionId, 'super-agent-worker')`（`lib/internal-sessions.js`），
+14. **内部会话的通知抑制由创建方登记**：Router 与 worker 都是普通 Session，
+    `dsh-away-notify` 只能按标题前缀兜底识别 worker，用户一改名就失效，Router 更是
+    连前缀都没有。因此安装 Router 时调
+    `awayNotify.markInternal(sessionId, 'super-agent-router')`、创建/恢复 worker 时调
+    `markInternal(sessionId, 'super-agent-worker')`（`lib/internal-sessions.js`），
     关闭/归档/agent 销毁时释放；`awayNotify` 缺席或没有该方法时**静默降级**，
-    worker 创建/关闭完全不受影响，通知侧退回标题前缀。
+    Router/worker 创建/关闭完全不受影响，通知侧退回标题前缀。登记只在 away-notify
+    的内存注册表里，不写 Session header，不影响会话列表/历史；未读徽标由
+    `session/event` + `attendance.js` 独立推进。
 14. **面板来源由面板插件显式登记**：`dsh-away-notify` 点通知时要判断「这条会话在哪个
     主区域面板里」，否则只能靠启发式——面板被选中后 15 秒内第一个新出现的 retain 来源。
     面板从没打开过、或同时有别的插件 retain 会话时，启发式会认错。因此浏览器半部在
@@ -148,12 +152,13 @@
     （`RenderBoundary`），官方 `CodeBlock`/`MarkdownText` 或我们自己的渲染抛错时，
     只把那一块换成错误态（消息 + 重试 + console 留栈），面板其余部分与宿主界面继续
     可用。React 在无边界时抛错会卸载整棵树——那正是「只能刷新」的来源。
-25. **「面板被切走」的根因在通知侧，不在导航**：worker 是普通 Session（header 上的
-    `origin: 'subagent'` / `delegationDepth` 两个内部标记它都没有），away-notify 会为
-    它的 `turn/end` 弹通知并写 `pendingFocus`；用户回到前台时 away-notify 原生消费
-    `pendingFocus`：`switchTo → replaceMain → selectPanel(null)` —— 面板被关、界面换到
-    worker 会话。修复是创建方把 worker 登记成内部会话（`awayNotify.markInternal`），
-    让通知在源头就不产生，而不是在导航层猜「这次切换是不是用户点的」。
+25. **「面板被切走」的根因在通知侧，不在导航**：Router 与 worker 都是普通 Session
+    （header 上的 `origin: 'subagent'` / `delegationDepth` 两个内部标记它们都没有），
+    away-notify 会为它们的 `turn/end` 弹通知并写 `pendingFocus`；用户回到前台时
+    away-notify 原生消费 `pendingFocus`：`switchTo → replaceMain → selectPanel(null)`
+    —— 面板被关、界面换到内部会话。修复是创建方把它们登记成内部会话
+    （`awayNotify.markInternal`），让通知在源头就不产生，而不是在导航层猜「这次切换
+    是不是用户点的」。
 26. **预览是面板里的一列，不是浮层**：`S.drawerPanel` 是 `flex: 0 0 auto; width 560
     (max 640)` 的 flex 子项，对话区 `flex: 1 1 auto; min-width: 0` 让位——和官方右栏
     「占一列、内容缩宽」同观感。官方右栏在插件面板里用不了（`ui-sidebar-right` 在
@@ -167,11 +172,14 @@
     server，presence 无点击记录），任何「无手势就拦」的启发式都会误伤正常回跳。默认
     不再拦截；普通会话的通知照常跳到该会话，被本面板 retain 的会话由 away-notify 激活
     面板（`awayNotifyPanels` 注册）。
-31. **worker 会话必须由创建方声明为内部会话**：DSH 没有给普通 Session 留「内部/系统」
-    标记（`SessionHeader.origin` 只允许 `'subagent'`，见 `dsh-session/lib/index.js:1053`），
-    而跨项目 worker 必须用 `sessionController.create({ cwd })` 建普通会话。因此
-    `lib/internal-sessions.js` 在创建/恢复时调用 `markInternal`，关闭/归档时释放；away-notify
-    未装或旧版没有该方法时静默降级（标题前缀仍可兜底）。
+31. **Router/worker 会话必须由创建方声明为内部会话**：DSH 没有给普通 Session 留
+    「内部/系统」标记（`SessionHeader.origin` 只允许 `'subagent'`，见
+    `dsh-session/lib/index.js:1053`），而跨项目 worker 必须用
+    `sessionController.create({ cwd })` 建普通会话，Router 也是普通会话。因此
+    `lib/internal-sessions.js` 在 Router 安装、worker 创建/恢复时调用 `markInternal`，
+    关闭/归档/销毁时释放；away-notify 未装或旧版没有该方法时静默降级（worker 的标题
+    前缀仍可兜底）。登记只在 away-notify 的内存注册表里，不写 header、不影响会话
+    列表/历史；未读徽标由 `session/event` + `attendance.js` 独立推进。
 29. **页面级单实例**：客户端可能被求值两次，所有「装一次」的东西（守卫包装、诊断订阅、
     away-notify 注册）都必须用 `window` 全局槽幂等，模块级 WeakMap 只在单次求值内有效。
 30. **错误态优先于结构假设**：接口返回非 ok 时只渲染错误文案（带 code），绝不把
@@ -563,10 +571,10 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | journal 有坏行 | 崩溃/手工编辑 | `status` 的 `journalBadLines` |
 | 文件预览提示「没有提供文件读取接口」 | `remote.workspaceFiles` 缺席（api-gateway 没装/还没就绪） | 浏览器控制台的 `ctx.inject(['remote.workspaceFiles'])`；预览抽屉有重试按钮 |
 | 文件预览提示「没有提供官方预览组件」 | 宿主版本太旧，没有 `@deepseek-ai/dsh-client-ui-primitives` seed | 浏览器控制台的 `require` 结果；升级宿主 |
-| 刚打开面板就被切走 | 以前是 worker 会话弹通知 → away-notify 的 pendingFocus 在焦点恢复时切会话；现在源头已抑制 | 先确认通知正文不是 `Super-agent worker · …`；`__SA_NAV_LOG__` 里若是 `away-notify.showSession` 说明目标是本面板的 Router，`nav.blocked` 只会在手动把 `localStorage['dsh.super-agent.navGuard']='on'` 后出现 |
+| 刚打开面板就被切走 | 以前是 Router/worker 会话弹通知 → away-notify 的 pendingFocus 在焦点恢复时切会话；现在两者都登记为内部会话，源头已抑制 | 通知正文不应再出现 `Super-agent · …` / `Super-agent worker · …`；`__SA_NAV_LOG__` 里若是 `away-notify.showSession` 说明目标是本面板的 Router（已登记则不会触发） |
 | 点文件后整屏变黑 / 点不动 | 预览用了铺满面板的遮罩外壳，或渲染期抛错卸载了整棵树 | `docs/screenshots/preview-drawer-*.png`；真机上按 `Esc` 应能关闭，控制台看 `[super-agent] render failed` |
 | 点通知不跳转 / 跳错实例 | 没注册 `showSession`；或 `/ui/state` 里没有该会话的 Router（已关闭/归档） | 地址栏 `?navdebug=1` 后看 `__SA_NAV_LOG__` 的 `reveal.*`；提示条会写明「认不出实例」 |
-| 回到窗口时被切到别的会话 | away-notify 的待跳转会话在发通知时就写入、任意焦点恢复时消费（90 秒有效）；worker 会话本不该产生它 | worker 已由创建方 `markInternal` 登记为内部会话，不再弹通知/写 pendingFocus；普通会话的回跳是按 away-notify 原生语义走 |
+| 回到窗口时被切到别的会话 | away-notify 的待跳转会话在发通知时就写入、任意焦点恢复时消费（90 秒有效）；super-agent 的内部会话本不该产生它 | Router/worker 均已由创建方 `markInternal` 登记为内部会话，不再弹通知/写 pendingFocus；普通用户会话的回跳是按 away-notify 原生语义走 |
 
 ## 14. 扩展点
 
@@ -656,7 +664,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 313 个用例，全部不需要模型调用。
+共 314 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录
