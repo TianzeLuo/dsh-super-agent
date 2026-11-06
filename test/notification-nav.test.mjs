@@ -213,50 +213,22 @@ test('navdebug 的来源标签能区分 away-notify / layout 服务 / 我们自�
   assert.match(blocked[0].stack, /navLog|guardedSelectPanel/, '仍带调用栈')
 })
 
-test('自动跟随开关：默认开，显式 off 才关闭（隐私模式下按开处理）', () => {
+test('落点固定为原生行为：没有「跟随」开关，到场请求直接 applyReveal', () => {
   const { __internals: internals } = loadClientBundle()
-  const store = new Map()
-  const storage = {
-    getItem: (key) => (store.has(key) ? store.get(key) : null),
-    setItem: (key, value) => { store.set(key, value) },
-  }
-
-  assert.equal(internals.navFollowEnabled(storage), true, '默认跟随：点通知像普通会话一样跳')
-  assert.equal(internals.setNavFollow(false, storage), false)
-  assert.equal(internals.navFollowEnabled(storage), false, '显式 off 后持久化，刷新仍然关')
-  assert.equal(internals.setNavFollow(true, storage), true)
-  assert.equal(internals.navFollowEnabled(storage), true, '重新打开恢复跟随')
-  assert.equal(internals.navFollowEnabled({ getItem: () => 'off' }), false)
-
-  // 隐私模式：读写都抛错时不能炸，按默认「跟随」处理。
-  const broken = {
-    getItem: () => { throw new Error('denied') },
-    setItem: () => { throw new Error('denied') },
-  }
-  assert.equal(internals.navFollowEnabled(broken), true)
-  assert.doesNotThrow(() => internals.setNavFollow(false, broken))
-  assert.equal(internals.navFollowEnabled({}), true, '没有存储时默认跟随')
-  assert.equal(internals.navFollowEnabled(), true, '真实环境默认跟随')
-})
-
-test('显式关闭跟随：到场的通知请求只出提示条，不会自动导航', async () => {
-  const { __internals: internals } = loadClientBundle()
-  // 源码契约：落点 effect 里先看开关，关了就走 offer 分支（提示 + 「定位」按钮），
-  // 绝不调用 applyReveal。
   const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
-  const effect = source.slice(source.indexOf('// 通知点击的落点。'))
-  assert.match(effect, /if \(!navFollowEnabled\(\)\) \{[\s\S]{0,900}?kind: 'offer'/)
-  assert.ok(effect.indexOf('if (!navFollowEnabled())') < effect.indexOf('void applyReveal(request)'),
-    '先判开关再导航')
+  const effect = source.slice(source.indexOf('// 通知点击的落点。'), source.indexOf('// 通知点击的落点。') + 1600)
+  assert.doesNotMatch(effect, /navFollow|kind: 'offer'|navLocate/, '不再有跟随开关或「定位」分支')
+  assert.match(effect, /void applyReveal\(request\)/)
+  assert.equal(internals.navFollowEnabled, undefined, '旧的 localStorage 开关已删除')
+  assert.doesNotMatch(source, /dsh\.super-agent\.navFollow/)
 
-  // 开关关着时，请求仍然照收：只是交给提示条，不是丢弃。
+  // 面板未挂载时请求排队，取一次即清空；面板在场时走同一个队列。
   internals.requestPanelReveal({ sessionId: 'sess-notify', instanceId: 'inst-b', reason: 'showSession' })
-  const queued = internals.takePanelReveal()
-  assert.equal(queued?.sessionId, 'sess-notify')
-  assert.equal(internals.navFollowEnabled(), true, '默认开；这条用例只验证 off 分支的源码契约')
+  assert.equal(internals.takePanelReveal()?.sessionId, 'sess-notify')
+  assert.equal(internals.takePanelReveal(), undefined)
 })
 
-test('通知点击不被开关挡住：面板照常被激活、请求照常入队', async () => {
+test('通知点击：面板被激活、请求入队（与是否在面板无关）', async () => {
   const { __internals: internals } = loadClientBundle()
   const log = { opened: 0, enqueued: [] }
   const queued = await internals.revealNotificationSession('session-other-router', {
@@ -265,9 +237,9 @@ test('通知点击不被开关挡住：面板照常被激活、请求照常入�
     enqueue: (request) => { log.enqueued.push(request); return true },
   })
   assert.equal(queued, true)
-  assert.equal(log.opened, 1, '默认关也只影响「自动跳」，不影响点通知选中面板')
-  assert.equal(log.enqueued.length, 1, '请求照常交给面板并自动定位')
-  assert.equal(internals.navFollowEnabled(), true)
+  assert.equal(log.opened, 1)
+  assert.equal(log.enqueued.length, 1, '请求交给面板并自动定位')
+  assert.equal(log.enqueued[0].instanceId, 'inst-other')
 })
 
 test('Router 会话常驻 retain：面板关着也算本面板的落点，消失/卸载才释放', () => {
