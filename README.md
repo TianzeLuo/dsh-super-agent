@@ -72,6 +72,17 @@ hashchange），而且手势是**一次性令牌**——点开面板那一下不
 复现脚本（不启动 dsh，用宿主三条路径的真实语义回放，对比装守卫前后）：
 `node test/manual/repro-panel-yank.mjs --navdebug`。
 
+**同一页面只会跑一份**：宿主可能把同一个包的 client 求值两次（聚合 boot combo
+一份 + 单独的 graph row 一份，见 `dsh-client-modules` 的 `buildCombo` / `graphRow`）。
+两份各有模块闭包，模块级 WeakMap 挡不住，所以单实例约束落在 `window` 上：
+`__dshSuperAgentInstance`（后到者先销毁前一份的守卫/诊断安装）、
+`__dshSuperAgentNavGuard`（同一 layout 只包一层）、`__dshSuperAgentNavDebug`
+（诊断只保一份订阅）、`__dshSuperAgentAwayNotify`（只留一个 `showSession`）。
+检测到第二份时会打一条 `console.warn`。
+
+清理旧实例：先 `Ctrl+Shift+R` 硬刷新；仍看到两套日志就在 DevTools Network 里确认
+`plugins/??…super-agent…` 只剩一条；再不行重启 `dsh web`（浏览器端改不了宿主那份聚合）。
+
 **文件预览为什么不是宿主官方右栏**：官方右栏（`dsh-client-ui-sidebar-right`）在
 `activePanelId !== null` 时整体停用——绑定只给「屏上会话」（`lib/client.js:4837`）、
 座位组件本身也要 `activePanelId === null` 才渲染（`:1608`），而且 `openResource()`
@@ -107,7 +118,7 @@ TTL 90 秒 `:721`），之后任意一次焦点/可见性恢复都会消费它�
 提示条里也带「以后自动跟随」。这个开关只影响本面板的自动落点：通知照弹、点通知照常
 选中面板、其它面板不受影响。
 
-排障：地址栏加 `?navdebug=1` 打开导航诊断（默认关闭）。每条日志都带 `source`：
+排障：地址栏加 `?navdebug=1` 打开导航诊断（默认关闭；结构化一行：`{type,source,target,at,detail}` + 两帧调用点）。每条日志都带 `source`：
 `layout.panelInfo`（宿主直接写 store，如 `retainMainPanels`）、`layout.selectPanel`
 （宿主或别的插件调服务）、`away-notify.showSession`（点通知/焦点恢复回跳，附
 `trigger: foreground|regain` 与可见/焦点快照）、`super-agent.*`（我们自己）。之后每次 `activePanelId`

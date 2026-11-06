@@ -150,7 +150,7 @@ test('面板卸载（插件卸载/热重载）时调用注册返回的注销函�
   assertRegistration(panels.released[0], { panelId: 'super-agent', sources: ['superAgentUi'] })
 })
 
-test('重复 apply（重新挂载）各自注册、各自注销，不累积', () => {
+test('重复 apply（第二份实例）接管 awayNotifyPanels 注册，且注销幂等', () => {
   const first = makePanels()
   const second = makePanels()
   const firstCtx = makeCtx({ panels: first.service })
@@ -161,8 +161,9 @@ test('重复 apply（重新挂载）各自注册、各自注销，不累积', ()
   exports.apply(secondCtx)
   assert.equal(first.calls.length, 1)
   assert.equal(second.calls.length, 1)
+  assert.equal(first.released.length, 1, '第二份实例接管时先注销第一份（单实例约束）')
   firstCtx.dispose()
-  assert.equal(first.released.length, 1)
+  assert.equal(first.released.length, 1, '注销幂等：不会把第一份注销两次')
   assert.equal(second.released.length, 0, '注销自己那份，不能顺手撤掉别人的')
   secondCtx.dispose()
   assert.equal(second.released.length, 1)
