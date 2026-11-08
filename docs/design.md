@@ -414,10 +414,14 @@ reminder 绑定会话，留着只会唤醒已经隐藏的旧 Router，新 Router
 ### 任务详情与中途指令
 
 活动栏只读任务，不读 Worker 内部会话。`uiTask` 汇总 Brief、报告、线程和
-`workerLive`；`uiTaskSteer` 在 Worker live 时直接 `followup` 一条带
-`[super-agent steer]` 标记的消息，不创建新任务、不改变任务归属。Worker 的下一
+`workerLive`；`uiTaskSteer` / `superagent_steer` 默认 `child.steer()`，把消息放进
+宿主的 `next-step` 队列：Worker 正在跑时在本 run 的下一次模型步（工具调用安全结束
+后的 step 边界）读到，不再等当前 run 结束。`interrupt: false` 退回
+`child.followup()`，作为独立的下一个 turn 排队。两种模式都只投一次、不创建新任务、
+不改变任务归属，回执与 `task.steered` 记录 `mode`/`interrupt`。Worker 的下一
 条报告仍以 `turn/end` 回到 Router，因此“纠正方向”和“汇报结果”走同一条链路。
-任务已结束或 Worker 已释放时，steer 返回明确错误，UI 不展示输入框。
+任务已结束或 Worker 已释放时，steer 返回明确错误，UI 不展示输入框；旧宿主 Agent
+没有 `steer()` 时自动退回排队并给 `warning`。
 
 ## 7. Thread 订阅与直通
 
@@ -476,7 +480,8 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 每 intervalMs:
   for each open task:
     starting 超过 startTimeoutMs        → 标记 failed + report
-    workerSessionId 无 live agent        → 标记 lost + report
+    starting 未超时                      → 跳过判 lost（session 可能还在写）
+    working/blocked-approval 查不到 worker → 首次只记时间；超过 lostGraceMs 且二次探测仍无 → 标记 lost + report
     blocked-approval 超过 approvalTimeoutMs → approval.escalated + watchdog trigger
     working 但 worker idle 超过 idleStaleMs → 合成 completed report
   pending 且 router idle 且最老超 pendingStaleMs → flushNow
@@ -491,6 +496,15 @@ Trigger ──threadId──▶ Thread ──taskIds──▶ Task
 - 没有问题时**不写 journal、不唤醒 Router**，保持安静。
 - 同一问题在 `repeatMs` 内只升级一次；问题消失后清掉抑制键，允许再次升级。
 - 能确定性修复的（lost/failed、flush、pump）先修；需要判断的才升级。
+- **starting 不是 lost**：跨项目 Worker 由宿主先建 Session（从 `start` 到宿主
+  返回 canonical id 可能要数秒，并发时更久），runtime 只登记 `starting`，等
+  activation 返回后才写 `workerSessionId`。这段时间 watchdog 若按“查不到会话”
+  判 lost，就会在 session 目录写完成前杀掉任务。启动失败由 `startTimeoutMs`
+  统一判 failed。
+- **lost 需要二次探测 + 宽限**：`working` / `blocked-approval` 第一次查不到
+  Worker 只记录 `missingWorkers`，下一次检查仍查不到且超过 `lostGraceMs`
+  （默认 10s）才落 lost；中途恢复则撤销记录。默认 30s 节拍下，真实丢弃最多
+  晚一个节拍上报，换来宿主换实例/事件循环抖动时不误杀。
 - Watchdog 的 Trigger 走 `internal: true`，绕过程序层过滤，避免被自己的策略挡掉。
 - **审批等待**不是宿主 Agent 状态：Worker 等权限时仍是 `running`，旧 watchdog 的
   idle/lost/starting 三条都看不到。`approval/asked` 一到 runtime 就把任务标成

@@ -28,6 +28,8 @@ Super-agent Workspace，不需要先选项目。
 - **双层调度**：同项目用 subagent，跨项目在目标项目建普通 Session，沙箱正确。
 - **多实例**：每实例独立目录、模型、规则、计划、未读；侧栏仍只有一个入口。
 - **Worker 复用**：Thread 后续直接投递到原 Worker；独立任务并行。
+- **中途指令插队**：给 Worker 的 steer 默认注入当前 run 的下一个模型步（工具调用
+  安全结束后），不等整轮结束；`interrupt:false` 保留排队语义。
 - **模型可控**：默认跟随宿主全部模型；可维护 allowlist、默认模型/effort。
 - **长期约定**：全局/项目规则注入 Router 和每个 Worker，Reset 不丢。
 - **定时唤醒**：一次/每日/每周/Cron，到点唤醒 Router 再决定是否派活。

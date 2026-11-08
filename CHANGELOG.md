@@ -4,6 +4,17 @@
 
 ### Changed
 
+- **steer 默认插队（P1-b）**：`superagent_steer`、面板和
+  `POST /api/super-agent/ui/task/steer` 默认把消息投到 Worker 的 `next-step`，在
+  当前 run 的下一次模型步前消费（正在执行的工具调用先安全结束），不再等整轮结束。
+  `interrupt:false`（或 `mode:"queue"`）保留旧的排队语义；回执与 journal 的
+  `task.steered` 记录 `mode`/`interrupt`，旧宿主没有 `steer()` 时自动退回排队并给
+  `warning`。每次调用只投一个队列，不会重复投递。回归：`test/runtime.test.mjs`
+  （默认插队、queue 对照、无 steer() fallback）与 `test/features.test.mjs`
+  （工具参数转发）。
+- **定位成功不再弹顶部提示**：从 away-notify 点进来后，面板顶部不再出现「已定位到
+  实例「…」产生通知的会话。」，跳转本身已说明结果；认不出会话/切换实例失败的提示
+  与「知道了」按钮照常保留，导航落点不变。
 - **移除「跟随」按钮与 localStorage 开关**：面板顶部不再有「跟随：开/关」，也不再写
   `dsh.super-agent.navFollow`；通知落点固定为 away-notify 原生行为（`showSession` →
   `applyReveal`），相关文案、off 分支、测试全部删除。
@@ -15,6 +26,15 @@
 
 ### Fixed
 
+- **Worker 刚启动就丢（P1-c）**：根因是 watchdog 在任务仍为 `starting` 时按
+  “`workerSessionId` 查不到 live agent”直接判 lost；跨项目路径还会在宿主创建
+  Session 前预写一个假的 session id。并发 spawn 时宿主建会话需要数秒，任何一次
+  watchdog 节拍落进这个窗口都会把任务杀掉（随后 activation 被 dispose）。修复：
+  `starting` 未超 `startTimeoutMs` 前不判 lost；`workerSessionId` 只在 activation
+  返回 canonical id 后登记；`working`/`blocked-approval` 的 lost 改为二次探测 +
+  `watchdog.lostGraceMs`（默认 10s）宽限。回归：`test/runtime.test.mjs`（启动中
+  不判 lost、宽限二次探测、恢复撤销、startTimeout 仍 failed、跨项目 starting 不写
+  假 id）。
 - **Router 通知恢复，点击落到面板而不是主视图**：回退「Router 也登记为 internal」——
   那会让 super-agent 完全静默，不是用户要的。Router 的 `turn/end` 照常弹通知；插件按
   `/ui/state` 的 `routers` 在**插件层常驻 retain** 所有 live Router（来源

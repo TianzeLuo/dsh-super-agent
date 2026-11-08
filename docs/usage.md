@@ -21,7 +21,9 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
   报告（倒序）、关联线程。卡片顶部 `‹` 返回列表，`✕` 关闭；详情占满右侧活动栏，
   不向对话区扩展，因此不会压到底部输入框。
 - 任务有在线 Worker 时，详情卡提供「给 Worker 发指令」输入框，可直接纠正方向、
-  补充约束；发送后 Worker 的报告仍以 trigger 回到 Router。底部固定「打开聊天」
+  补充约束；默认**插队**到当前 run 的下一个模型步（不打断正在执行的工具），
+  发送后 Worker 的报告仍以 trigger 回到 Router。排队模式见
+  [中途指令](#中途指令)。底部固定「打开聊天」
   跳到完整 Worker 会话；关闭任务只释放 Agent、不归档会话，所以历史任务也能回看。
 - 「在会话中打开」把当前 Router 作为普通 DSH 会话打开；如果宿主尚未注入
   `uiWorkspace`，面板会提示重试，而不是静默无反应。
@@ -39,7 +41,8 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
   旧 Worker 归档，旧 Router 会话保留但隐藏。长期约定文件不随 Reset 丢失。
 - Worker Session 不出现在侧栏，`[super-agent]` 内部 trigger 不出现在聊天流。
 - 点通知（`dsh-away-notify`）会回到产生它的**实例 + 会话**：选中面板 → 切实例 →
-  adopt 那条会话，面板顶部给一条可撤销提示。已经在那个实例/面板上也照样定位。
+  adopt 那条会话。成功定位不弹顶部提示（跳转本身已说明结果）；只有认不出会话或
+  切换实例失败时才给一条提示。已经在那个实例/面板上也照样定位。
   点通知直接打开面板并定位到对应实例/会话，行为与普通会话一致（走 away-notify 原生
   落点，面板没有「跟随」开关）。没有待跳转通知时，切窗口/切标签不会跳；有待跳转通知时
   与普通会话一致（away-notify 只有一条消费通路，点击和回到前台不可区分）。
@@ -241,6 +244,28 @@ Worker 默认隔离；同一项目里的连续工作可以复用已有上下文�
 - 需要独立并行或跨项目时不要复用，直接创建新 Worker；
 - 旧任务保持为独立活动记录；关闭其中一个不会掐掉仍被其他任务共享的 Worker。
 
+## 中途指令
+
+任务有 live Worker 时，`superagent_steer`、面板输入框和
+`POST /api/super-agent/ui/task/steer` 都能给 Worker 补一条消息。默认是**插队**
+（`interrupt: true`）：
+
+- 消息进宿主的 `next-step` 队列，Worker 在**当前 run 的下一个模型步**之前读到；
+- 宿主只在 step 边界注入，正在执行的工具调用会先安全结束，不会被打断；
+- 这只影响消息何时被 Worker 看见，不改变任务归属；Worker 的最终报告仍以
+  `turn/end` trigger 回到 Router。
+
+需要“等这一轮做完再处理”时用排队（`interrupt: false`，兼容旧行为）：消息作为独立的
+follow-up turn，当前 run 结束后才被消费。两种模式都立即返回 `accepted`，回执里的
+`mode` / `interrupt` / `delivery`（`next-step` 或 `next-turn`）标明实际模式；
+journal 的 `task.steered` 事件也记录 `mode` 与 `interrupt`；任务详情
+`/ui/task` 和 `superagent_status` 的 activity 行会带 `lastSteerMode` /
+`lastSteerInterrupt`，可回看最后一次 steer 的模式。
+
+选择建议：纠偏、补充约束、回答 Worker 的问题用插队；交接给下一段工作、不希望改变
+当前步骤目标时用排队。旧宿主 Agent 没有 `steer()` 时自动退回排队，并在回执里给
+`warning`。
+
 ### 重启之后
 
 `dsh web` 重启后 Worker 会话从内存里消失，任务注册表（journal）还在。启动时插件
@@ -285,7 +310,7 @@ node bin/super-agent.mjs config
 | POST | `/api/super-agent/ui/reset` | 中止并归档 Worker、取消定时任务、切换 generation、创建新 Router |
 | GET | `/api/super-agent/ui/activity?limit=N` | 近期活动（含已结束），`limit` 最大 50 |
 | GET | `/api/super-agent/ui/task?task_id=…` | 单个任务详情：Brief、报告、线程、Worker 是否在线 |
-| POST | `/api/super-agent/ui/task/steer` | 给在线 Worker 发一条指令，body `{task_id,text}` |
+| POST | `/api/super-agent/ui/task/steer` | 给在线 Worker 发一条指令，body `{task_id,text,interrupt?}`；`interrupt` 默认 true（插队到当前 run 的下一步），false 为排队；`mode:"queue"` 是等价别名 |
 | GET/POST | `/api/super-agent/ui/models` | 读/写 Worker 模型 allowlist 和默认选择 |
 | GET/POST | `/api/super-agent/ui/agreements` | 读/写长期工作约定 |
 | GET/POST | `/api/super-agent/ui/schedules` | 读/建定时唤醒 |
@@ -338,6 +363,7 @@ node bin/super-agent.mjs config
     "intervalMs": 30000,
     "pendingStaleMs": 90000,
     "startTimeoutMs": 120000,
+    "lostGraceMs": 10000,
     "idleStaleMs": 300000,
     "repeatMs": 600000
   },
@@ -395,6 +421,10 @@ node bin/super-agent.mjs config
 - `models.defaultEffort`：默认思考强度；为空用模型自己的默认。
 - `approval.mode`：`ask` / `auto-workspace` / `deny-all`；本版本只记录，不自动
   回答。`watchdog.approvalTimeoutMs` 是审批等待升级时间（默认 60000ms）。
+- `watchdog.startTimeoutMs`：任务停在 `starting` 多久判启动失败（默认 120000ms）；
+  未超时前 watchdog 不会因为“还查不到 Worker 会话”判 lost。
+- `watchdog.lostGraceMs`：`working`/`blocked-approval` 首次查不到 Worker 后的宽限
+  窗口（默认 10000ms）；下一次 watchdog 检查仍查不到才落 lost，期间恢复则撤销。
 - `agreements.fileName`：相对项目根 `.dsh/` 的文件名；一般不用改。
 - `schedule.maxActive`：活跃定时任务上限；`timeZone` 是未传时区时的默认 IANA
   时区，空表示用宿主本地时区。
