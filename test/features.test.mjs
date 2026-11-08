@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { fakeModels, fakeProject, setupRuntime, tick } from './fake-host.mjs'
+import { createTools } from '../lib/tools.js'
 
 const catalog = {
   groups: [
@@ -230,4 +231,20 @@ test('schedule validation enforces one selector and safe intervals', async () =>
     ctx.runtime.createSchedule({ title: 'No prompt', prompt: '', after_seconds: 60 }),
     /prompt is required/,
   )
+})
+
+test('superagent_steer forwards the interrupt flag to the runtime', async () => {
+  const calls = []
+  const tools = createTools({
+    steer(taskId, message, options) {
+      calls.push([taskId, message, options])
+      return { ok: true }
+    },
+  })
+  const steer = tools.find((candidate) => candidate.name === 'superagent_steer')
+  assert.equal(steer.parameters.properties.interrupt.type, 'boolean')
+  await steer.execute({ task_id: 'tsk_test', message: 'go', interrupt: false })
+  await steer.execute({ task_id: 'tsk_test', message: 'go' })
+  assert.deepEqual(calls[0], ['tsk_test', 'go', { attachments: undefined, interrupt: false }])
+  assert.deepEqual(calls[1], ['tsk_test', 'go', { attachments: undefined, interrupt: undefined }])
 })

@@ -104,8 +104,8 @@ export function fakeRouter(cwd, messages = []) {
   return router
 }
 
-/** 假 Worker。 */
-export function fakeChild(id) {
+/** 假 Worker。`options.steer: false` 模拟没有 step 级注入能力的旧宿主。 */
+export function fakeChild(id, options = {}) {
   const ctx = fakeCtx()
   const child = {
     id,
@@ -113,7 +113,15 @@ export function fakeChild(id) {
     ctx,
     session: { id, header: { id, origin: 'subagent', delegationDepth: 1 } },
     messages: [],
+    steers: [],
+    followups: [],
     followup(message) {
+      child.followups.push(message)
+      child.messages.push(message)
+      child.status = 'running'
+    },
+    steer(message) {
+      child.steers.push(message)
       child.messages.push(message)
       child.status = 'running'
     },
@@ -131,6 +139,7 @@ export function fakeChild(id) {
       child.ctx.emit('agent/disposed', { agent: child })
     },
   }
+  if (options.steer === false) delete child.steer
   return child
 }
 
