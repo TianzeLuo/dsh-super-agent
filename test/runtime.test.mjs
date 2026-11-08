@@ -358,20 +358,122 @@ test('reusing a worker rejects a busy or closed context', async () => {
   ctx.runtime.stop()
 })
 
-test('watchdog marks a missing worker lost and reports to the router', async () => {
-  const ctx = setupRuntime()
+test('watchdog marks a missing worker lost only after a second probe and grace', async () => {
+  let clock = Date.now()
+  const ctx = setupRuntime({ now: () => clock })
   const tid = threadId('im', 'team:dev')
   const dispatched = ctx.runtime.dispatch({ title: 'Fix login', brief: 'Do the work', threadIds: [tid] })
   await tick()
   const child = [...ctx.children.values()][0]
   ctx.children.delete(child.id) // 模拟 Worker 会话被宿主回收
 
+  // 第一次探测只记录时间，不判 lost。
+  const first = ctx.runtime.checkNow()
+  assert.equal(first.issues.length, 0)
+  assert.equal(ctx.store.getTask(dispatched.taskId).status, 'working')
+
+  clock += ctx.config.watchdog.lostGraceMs + 1
   const result = ctx.runtime.checkNow()
   assert.ok(result.issues.some((issue) => issue.key.startsWith('task-lost')))
   assert.ok(result.repairs.length > 0)
   assert.equal(ctx.store.getTask(dispatched.taskId).status, 'lost')
   const pending = ctx.store.pendingTriggers()
   assert.ok(pending.some((trigger) => trigger.kind === 'worker-report'))
+  ctx.runtime.stop()
+})
+
+test('watchdog does not mark a starting task lost before its worker session exists', async () => {
+  const project = fakeProject()
+  const gate = Promise.withResolvers()
+  let activation
+  const subagents = {
+    getProvider: () => ({ name: 'spawn', capabilities: {} }),
+    startActivation(spec) {
+      const child = fakeChild(spec.childId)
+      const result = Promise.withResolvers()
+      activation = {
+        childId: child.id,
+        result: result.promise,
+        disposed: false,
+        spec,
+        async dispose() {
+          activation.disposed = true
+          child.dispose()
+          result.resolve({})
+        },
+      }
+      return gate.promise
+    },
+  }
+  const ctx = setupRuntime({ project, subagents })
+  const dispatched = ctx.runtime.dispatch({ title: 'Slow start', brief: 'Work' })
+  await tick()
+  const starting = ctx.store.getTask(dispatched.taskId)
+  assert.equal(starting.status, 'starting')
+  assert.equal(starting.workerSessionId, undefined)
+
+  const result = ctx.runtime.checkNow()
+  assert.equal(result.issues.length, 0)
+  assert.equal(ctx.store.getTask(dispatched.taskId).status, 'starting')
+
+  gate.resolve(activation)
+  await tick()
+  const working = ctx.store.getTask(dispatched.taskId)
+  assert.equal(working.status, 'working')
+  assert.equal(working.workerSessionId, activation.childId)
+  ctx.runtime.stop()
+})
+
+test('watchdog fails a starting task only after startTimeoutMs', async () => {
+  const project = fakeProject()
+  const gate = Promise.withResolvers()
+  let activation
+  const subagents = {
+    getProvider: () => ({ name: 'spawn', capabilities: {} }),
+    startActivation(spec) {
+      const child = fakeChild(spec.childId)
+      const result = Promise.withResolvers()
+      activation = {
+        childId: child.id,
+        result: result.promise,
+        disposed: false,
+        spec,
+        async dispose() {
+          activation.disposed = true
+          child.dispose()
+          result.resolve({})
+        },
+      }
+      return gate.promise
+    },
+  }
+  let clock = Date.now()
+  const ctx = setupRuntime({ project, subagents, now: () => clock })
+  const dispatched = ctx.runtime.dispatch({ title: 'Stuck start', brief: 'Work' })
+  await tick()
+  clock += ctx.config.watchdog.startTimeoutMs + 1
+  const result = ctx.runtime.checkNow()
+  assert.ok(result.issues.some((issue) => issue.key.startsWith('task-start')))
+  assert.equal(ctx.store.getTask(dispatched.taskId).status, 'failed')
+  gate.resolve(activation)
+  await tick()
+  assert.equal(activation.disposed, true)
+  ctx.runtime.stop()
+})
+
+test('watchdog clears the grace record when a missing worker comes back', async () => {
+  let clock = Date.now()
+  const ctx = setupRuntime({ now: () => clock })
+  const dispatched = ctx.runtime.dispatch({ title: 'Briefly gone', brief: 'Work' })
+  await tick()
+  const child = [...ctx.children.values()][0]
+  ctx.children.delete(child.id)
+  assert.equal(ctx.runtime.checkNow().issues.length, 0)
+
+  ctx.children.set(child.id, child)
+  clock += ctx.config.watchdog.lostGraceMs + 1
+  assert.equal(ctx.runtime.checkNow().issues.length, 0)
+  assert.equal(ctx.store.getTask(dispatched.taskId).status, 'working')
   ctx.runtime.stop()
 })
 
@@ -669,6 +771,11 @@ test('cross-project dispatch uses an ordinary Session worker so the target proje
   const ctx = setupRuntime()
   const outside = mkdtempSync(join(tmpdir(), 'dsh-super-agent-other-'))
   const dispatched = ctx.runtime.dispatch({ title: 'Cross project', brief: 'Write into the other project', cwd: outside })
+  // 宿主还没返回 canonical session id 前，任务只能是 starting，不能预写一个
+  // 永远不会被 getAgent 找到的假 id（P1-c 的第二个根因）。
+  const starting = ctx.store.getTask(dispatched.taskId)
+  assert.equal(starting.status, 'starting')
+  assert.equal(starting.workerSessionId, undefined)
   await tick()
 
   assert.equal(ctx.subagents.spawns.length, 0)

@@ -142,6 +142,14 @@ test('config warnings do not throw and keep defaults', () => {
   assert.equal(gate.config.worker.maxWorkers, 4)
 })
 
+test('watchdog.lostGraceMs defaults to 10s and rejects negatives', () => {
+  const ok = loadProjectConfig({ cwd: project({ enabled: true, watchdog: { lostGraceMs: 2500 } }) })
+  assert.equal(ok.config.watchdog.lostGraceMs, 2500)
+  const bad = loadProjectConfig({ cwd: project({ enabled: true, watchdog: { lostGraceMs: -1 } }) })
+  assert.equal(bad.config.watchdog.lostGraceMs, DEFAULTS.watchdog.lostGraceMs)
+  assert.ok(bad.warnings.some((warning) => warning.includes('lostGraceMs')))
+})
+
 test('mergeConfig is a deep merge with array replacement', () => {
   const merged = mergeConfig({ a: { b: 1, c: [1, 2] } }, { a: { c: [3], d: 4 } })
   assert.deepEqual(merged, { a: { b: 1, c: [3], d: 4 } })
