@@ -112,7 +112,7 @@ test('status rendering is compact and includes the important counts', () => {
       threads: 1,
       triggers: 5,
       filtered: 1,
-      tasks: { working: 1, idle: 0, queued: 1, closed: 0 },
+      tasks: { working: 1, idle: 0, queued: 1, closed: 0, active: 2, lost: 0, interrupted: 0 },
     },
     outbox: { total: 1, byChannel: { im: 1 } },
     watchdog: { lastCheckAt: Date.now(), issues: [] },

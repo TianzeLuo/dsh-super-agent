@@ -337,9 +337,15 @@ export function main(argv = process.argv.slice(2)) {
         lines.push('no journal yet')
       } else {
         const counts = snapshot.counts
+        // active/lost 由 lib/task-counts.js 派生：lost/interrupted 不算进行中。
+        const taskCounts = counts.tasks ?? {}
+        const detail = Object.entries(taskCounts)
+          .filter(([key, value]) => key !== 'active' && key !== 'lost' && key !== 'interrupted' && value > 0)
+          .map(([key, value]) => `${key}:${value}`)
+          .join(' ')
         lines.push(
           `triggers ${counts.triggers} (${counts.pending} pending, ${counts.filtered} filtered) · threads ${counts.threads} · batches ${counts.batches}`,
-          `tasks: ${Object.entries(counts.tasks).filter(([, value]) => value > 0).map(([key, value]) => `${key}:${value}`).join(' ') || 'none'}`,
+          `tasks: ${taskCounts.active ?? 0} active · ${taskCounts.lost ?? 0} lost · ${taskCounts.interrupted ?? 0} interrupted${detail ? ` (${detail})` : ''}`,
           `outbox: ${counts.replies} (${Object.entries(counts.repliesByChannel).map(([key, value]) => `${key}:${value}`).join(', ') || 'empty'})`,
         )
       }
