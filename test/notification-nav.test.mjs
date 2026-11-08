@@ -321,3 +321,22 @@ test('注册给 away-notify 的 showSession 真的会把请求交给面板队列
   assert.equal(queued.instanceId, 'inst-other')
   assert.equal(queued.reason, 'notification')
 })
+
+test('定位成功不再弹顶部提示；失败/未知提示照常保留', () => {
+  const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
+  const start = source.indexOf('const applyReveal = React.useCallback')
+  const end = source.indexOf('}, [adoptSession, switchInstance, routerSessionIds])', start)
+  assert.ok(start > 0 && end > start, '找得到 applyReveal 的定位分支')
+  const reveal = source.slice(start, end)
+
+  assert.doesNotMatch(reveal, /kind: 'located'/, '成功定位不该再产生顶部提示')
+  assert.match(reveal, /setNavNotice\(undefined\)/, '成功定位只清掉可能残留的旧提示，不新弹一条')
+  assert.match(reveal, /kind: 'failed'/, '切换实例失败仍要提示')
+  assert.match(reveal, /kind: 'unknown'/, '认不出会话仍要提示')
+
+  assert.doesNotMatch(source, /已定位到实例|navLocated|navLocatedHere|navBack/,
+    '成功提示的文案、「返回」按钮与 i18n key 一并移除')
+  assert.match(source, /navSwitchFailed/, '失败提示文案保留')
+  assert.match(source, /navUnknown/, '未知会话提示文案保留')
+  assert.match(source, /navDismiss/, '提示的关闭按钮保留')
+})
