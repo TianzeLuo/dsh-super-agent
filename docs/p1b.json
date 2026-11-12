@@ -1,0 +1,205 @@
+{
+  "task": "P1-b: steer 插队投递（本轮内可见）",
+  "taskId": "tsk_9f26671a7b",
+  "package": "dsh-super-agent",
+  "version": "0.9.0",
+  "generatedAt": "2026-11-07T09:01:00-08:00",
+  "scope": {
+    "included": [
+      "superagent_steer / 面板 / HTTP 的投递模式",
+      "interrupt 默认：宿主 next-step 队列，在当前 run 的下一个模型步消费",
+      "queue 兼容：interrupt:false 仍是 next-turn，等当前 run 结束后消费",
+      "回执、journal、taskDetail 的 mode/interrupt 记录"
+    ],
+    "untouched": ["宿主包", "3080 线上实例", "~/.dsh", "git 提交", "其它插件功能"],
+    "notDone": [
+      "未在面板增加“插队/排队”切换控件（面板输入默认走新的 interrupt 路径）",
+      "未在面板活动详情显示 lastSteerMode（数据已由 taskDetail 提供，UI 未渲染）"
+    ]
+  },
+  "deliveryChain": [
+    {
+      "layer": "tool",
+      "file": "lib/tools.js",
+      "symbol": "superagent_steer",
+      "line": 629,
+      "change": "新增参数 interrupt?: boolean（默认 true）；execute 把 interrupt 原样传给 runtime.steer。"
+    },
+    {
+      "layer": "http",
+      "file": "lib/index.js",
+      "symbol": "uiTaskSteer（POST /api/super-agent/ui/task/steer）",
+      "line": 1601,
+      "change": "解析 body.interrupt；另接受 mode:\"queue\" / mode:\"interrupt\" 别名；回执展开 runtime.steer 的结果（含 interrupt/mode/delivery）。"
+    },
+    {
+      "layer": "runtime",
+      "file": "lib/runtime.js",
+      "symbol": "SuperAgentRuntime#steer",
+      "line": 2136,
+      "change": "默认 wantsInterrupt=true；有 child.steer 时调用 child.steer(userMessage(...))，否则 child.followup(...) 并在回执给 warning。单一投递分支：每次调用只进一个宿主队列。"
+    },
+    {
+      "layer": "host",
+      "file": "@deepseek-ai/dsh-agent-loop",
+      "symbol": "ReactLoopAgent#steer / #followup",
+      "line": 809,
+      "change": "（只读使用，未改宿主）steer → send(message, \"next-step\", true)；followup → send(message, \"next-turn\", true)。preStep 在每个 step 边界 claim next-step，因此插队消息在当前 turn 的下一次模型请求可见；工具调用先正常结束。"
+    },
+    {
+      "layer": "store",
+      "file": "lib/store.js",
+      "symbol": "Store#applySteered",
+      "line": 469,
+      "change": "task.steered 事件新增 mode / interrupt；fold 出 lastSteerMode、lastSteerInterrupt，旧 journal 无 mode 时按 queue 回放。"
+    },
+    {
+      "layer": "view",
+      "file": "lib/runtime.js",
+      "symbol": "SuperAgentRuntime#taskDetail",
+      "line": 2863,
+      "change": "详情返回 lastSteerMode / lastSteerInterrupt，供面板或工具读取；activity 行也带同样字段（superagent_status 可见），superagent_recall 同步返回 lastSteerMode。"
+    }
+  ],
+  "implementation": {
+    "defaultMode": "interrupt",
+    "interruptPath": "runtime.steer → child.steer(userMessage(text)) → 宿主 next-step 队列 → 当前 turn 的下一次 preStep claim → 下一 step 的模型请求可见。",
+    "queuePath": "runtime.steer({interrupt:false}) → child.followup(userMessage(text)) → 宿主 next-turn 队列 → 当前 turn/end 之后开新 turn 才 claim。",
+    "toolCallSafety": "宿主只在 step 边界注入；正在执行的工具调用会先拿到 tool/result、写完 step/end，然后才进入下一 step，不打断工具。",
+    "singleDelivery": "wantsInterrupt 与 canInterrupt 决定唯一分支；不会同时 steer + followup 投两次。每次调用只生成一个 userMessage，宿主只 splice 一次。",
+    "fallback": "旧宿主 Agent 没有 steer() 时自动走 followup，mode=\"queue\"，回执带 warning: \"the worker does not expose steer(); the message was queued as a follow-up turn\"。",
+    "receipt": {
+      "fields": ["interrupt", "mode", "delivery", "attachments?", "warning?", "note"],
+      "interruptExample": "{ ok: true, status: \"accepted\", interrupt: true, mode: \"interrupt\", delivery: \"next-step\" }",
+      "queueExample": "{ ok: true, status: \"accepted\", interrupt: false, mode: \"queue\", delivery: \"next-turn\" }"
+    },
+    "logLine": "[super-agent] steer tsk_...: interrupt=1 mode=interrupt（queue 时 interrupt=0 mode=queue）",
+    "journalEvent": "{\"t\":\"task.steered\",\"taskId\":\"tsk_...\",\"mode\":\"interrupt|queue\",\"interrupt\":true|false}",
+    "api": {
+      "tool": "superagent_steer(task_id, message, interrupt?: boolean, attachments?: string[])",
+      "http": "POST /api/super-agent/ui/task/steer body {task_id,text,interrupt?}（mode 是别名）",
+      "runtime": "runtime.steer(taskId, message, { interrupt, attachments })"
+    }
+  },
+  "evidence": {
+    "instance": {
+      "isolation": "独立 DSH_HOME + DSH_SUPER_AGENT_HOME + XDG_DATA_HOME；未改 ~/.dsh 内容；3080 仍在监听且未重启。",
+      "realHomeCheck": "~/.dsh/profiles/web/cordis.patch.yml 与 08:46 的隔离副本 diff 为空（宿主 live reload 只重写了 mtime，内容未变）；未执行任何写 ~/.dsh 的命令。",
+      "scratch": "/tmp/dsh-p1b-Bdw45sXt",
+      "model": "dsh-provider-qoder/qfmodel · reasoningEffort=xhigh",
+      "bootCommands": [
+        "cp -a ~/.dsh/profiles/web $SCRATCH/home2/profiles/web",
+        "cp -a ~/.dsh/.credentials.yaml $SCRATCH/home2/.credentials.yaml",
+        "env -u DSH_WEB_URL -u DSH_PROFILE -u DSH_PROFILE_DIR -u DSH_SESSION_ID DSH_HOME=$SCRATCH/home2 DSH_SUPER_AGENT_HOME=$SCRATCH/sa-home XDG_DATA_HOME=$SCRATCH/xdg dsh --profile web --port 3094 --host 127.0.0.1 --no-open"
+      ],
+      "bootResult": "dsh web: http://127.0.0.1:3094/?token=<redacted>；未带 token 时 / 返回 401（鉴权正常）；Playwright 1.64.1 无头 Chromium 打开面板成功。",
+      "portCheck": "启动验证期间 127.0.0.1:3080 与 127.0.0.1:3094 同时 LISTEN；验证后已停止 3094，3080 保持 LISTEN、未重启。",
+      "stoppedAfterVerification": true
+    },
+    "interruptRun": {
+      "taskId": "tsk_98fc6dd81d",
+      "workerSessionId": "session-<uuid>",
+      "workerSessionPath": "/tmp/dsh-p1b-Bdw45sXt/home2/sessions/--tmp-dsh-p1b-Bdw45sXt-work2--/session-<uuid>/session.v4.jsonl.zstd",
+      "stepAtSteer": "turn 1 / step 3",
+      "steerWallClock": "2026-11-07T08:53:48.547-08:00",
+      "httpReceipt": {
+        "http": 200,
+        "ok": true,
+        "interrupt": true,
+        "mode": "interrupt",
+        "delivery": "next-step",
+        "lastSteerMode": "interrupt"
+      },
+      "journalLine": "{\"v\":1,\"seq\":11,\"at\":1794070428550,\"t\":\"task.steered\",\"taskId\":\"tsk_98fc6dd81d\",\"mode\":\"interrupt\",\"interrupt\":true}",
+      "sessionEvidence": [
+        "seq 24 step/start turn=1 step=3",
+        "seq 25 agent/inbox/spliced target=next-step inserted=[\"PROBE-A1: mid-run interrupt test...\"]",
+        "seq 27 tool/call turn=1 step=3 name=read f03.txt",
+        "seq 28 tool/result turn=1 step=3",
+        "seq 29 step/end turn=1 step=3",
+        "seq 30 agent/inbox/spliced target=next-step inserted=[]（被 claim）",
+        "seq 31 step/start turn=1 step=4",
+        "seq 32 user/message text=\"PROBE-A1: mid-run interrupt test...\"",
+        "seq 33 assistant/message turn=1 step=4 ... PROBE-A1-SEEN",
+        "seq 105 turn/end turn=1 reason=completed"
+      ],
+      "workerReport": "任务完成——共执行 17 次读取调用…在第 4 步（f04.txt）后收到一条路由内消息…准确输出了标记 PROBE-A1-SEEN，未重新排序或跳过任何读取调用即继续执行计划顺序。",
+      "verdict": "同一条消息在 turn 1 内、step 3 结束后、step 4 开始前被消费；turn/end(seq 105) 在其之后，证明不是下一个 run 才看到。"
+    },
+    "queueRun": {
+      "taskId": "tsk_4267957439",
+      "workerSessionId": "session-<uuid>",
+      "workerSessionPath": "/tmp/dsh-p1b-Bdw45sXt/home2/sessions/--tmp-dsh-p1b-Bdw45sXt-work3--/session-<uuid>/session.v4.jsonl.zstd",
+      "stepAtSteer": "turn 1 / step 2",
+      "steerWallClock": "2026-11-07T08:54:46.025-08:00",
+      "httpReceipt": {
+        "http": 200,
+        "ok": true,
+        "interrupt": false,
+        "mode": "queue",
+        "delivery": "next-turn",
+        "lastSteerMode": "queue"
+      },
+      "journalLine": "{\"v\":1,\"seq\":20,\"at\":1794070486066,\"t\":\"task.steered\",\"taskId\":\"tsk_4267957439\",\"mode\":\"queue\",\"interrupt\":false}",
+      "sessionEvidence": [
+        "seq 20 agent/inbox/spliced target=next-turn inserted=[\"PROBE-B1: mid-run interrupt test...\"]",
+        "seq 103 turn/end turn=1 reason=completed",
+        "seq 104 turn/start turn=2",
+        "seq 105 agent/inbox/spliced target=next-turn inserted=[]（被 claim）",
+        "seq 106 step/start turn=2 step=1",
+        "seq 107 user/message text=\"PROBE-B1: mid-run interrupt test...\"",
+        "seq 108 assistant/message turn=2 step=1 acknowledges the late message"
+      ],
+      "workerReport": "第 1 轮报告明确写：No user/steer message arrived mid-run in this session; nothing to acknowledge. 该报告对应 turn 1 完成，早于 PROBE-B1 被消费的 turn 2。",
+      "workerSecondReport": "turn 2 报告（journal seq 27）：PROBE-B1-SEEN — ... all prescribed steps ... had already been executed to completion before this interrupt arrived. 证明排队消息是在 turn 1 完成之后才看到。",
+      "verdict": "消息在 turn 1 运行中只进 next-turn；turn/end(seq 103) 之后才 turn/start(seq 104)，seq 107 才出现 user/message。与 interrupt 的对照成立。"
+    },
+    "duplicateCheck": {
+      "interrupt": "PROBE-A1 的 agent/inbox/spliced 一次（seq 25），user/message 一次（seq 32）；没有第二次投递。",
+      "queue": "PROBE-B1 的 agent/inbox/spliced 一次（seq 20），user/message 一次（seq 107）。"
+    },
+    "screenshots": [
+      "docs/screenshots/p1b-interrupt-running.png（活动栏显示 P1b steer interrupt PROBE-A1 working）",
+      "docs/screenshots/p1b-interrupt-after.png（Router 汇报 PROBE-A1-SEEN，活动栏对应任务）",
+      "docs/screenshots/p1b-queue-running.png（活动栏显示 PROBE-B1 working，作为 queue 对照运行态）"
+    ],
+    "screenshotCaveat": "面板活动详情不渲染 lastSteerMode，因此截图只证明运行中的任务与 Router 汇报；模式差异以回执、journal 和 worker session 事件为准。"
+  },
+  "tests": {
+    "command": "npm test（node --test）",
+    "result": { "total": 342, "pass": 342, "fail": 0 },
+    "newTests": [
+      "test/runtime.test.mjs: steer defaults to interrupt: one next-step delivery within the current run（断言 child.steers=1、child.followups=0、回执 mode/delivery、journal mode=interrupt、taskDetail.lastSteerMode）",
+      "test/runtime.test.mjs: steer interrupt:false keeps the legacy queue（断言 child.followups=1、child.steers=0、delivery=next-turn、lastSteerMode=queue）",
+      "test/runtime.test.mjs: a worker without steer() falls back to a single queued delivery（断言 warning、只投一次、lastSteerMode=queue）",
+      "test/features.test.mjs: superagent_steer 把 interrupt 原样转给 runtime（false 与省略两种）"
+    ],
+    "syntaxCheck": [
+      "node --check lib/runtime.js",
+      "node --check lib/store.js",
+      "node --check lib/tools.js",
+      "node --check lib/index.js",
+      "node --check test/fake-host.mjs",
+      "node --check test/runtime.test.mjs"
+    ],
+    "syntaxResult": "全部通过",
+    "fakeHost": "test/fake-host.mjs 的 fakeChild 新增 steers/followups 两个记录数组；steer() 只进 steers，followup() 只进 followups；messages 仍合并两者以兼容旧断言。"
+  },
+  "docsUpdated": [
+    "README.md（关键功能新增“中途指令插队”）",
+    "docs/usage.md（UI 说明、HTTP body、新增“中途指令”小节）",
+    "docs/design.md（任务详情与中途指令的投递语义）",
+    "docs/testing.md（用例数 342）",
+    "CHANGELOG.md（Changed/P1-b）"
+  ],
+  "rollout": {
+    "appliesTo3080": false,
+    "gitCommitted": false,
+    "reason": "改动只在仓库 <local>/project/tools/plugin/dsh-super-agent；未重启 3080、未对 3080 执行安装/启用操作、未替换线上配置。是否在 3080 生效需用户显式重启/安装；默认不启用。"
+  },
+  "risks": [
+    "宿主 Agent 若无 steer()（旧版本）会退回 queue；回执 warning 可识别，不会静默宣称插队成功。",
+    "插队仍受宿主 step 边界约束：长工具调用期间不会立即打断，这是安全边界而非延迟缺陷。",
+    "面板暂未提供 queue 切换控件；需要排队时使用工具参数或 HTTP interrupt:false。"
+  ]
+}
