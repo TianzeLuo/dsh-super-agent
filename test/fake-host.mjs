@@ -319,6 +319,7 @@ export function setupRuntime(options = {}) {
     dataDir: project.dataDir,
     subagents,
     sessionWorkers,
+    attachmentSource: options.attachmentSource,
     projects,
     models,
     schedule,
