@@ -662,6 +662,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、idle 释放槽位、Worker 复用、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker、project 解析 |
 | 审批阻塞 | `test/approval.test.mjs` | `approval/asked`→`blocked-approval`+Router trigger、幂等、`approval/decided` 恢复、60s watchdog 升级一次、策略解析/建议、B 阶段 answerer 工厂、journal 回放 |
 | 重启恢复 | `test/recovery.test.mjs` | 重建 runtime 读回全部任务、会话在→resumable、会话没了→interrupted、closed 不复活、interrupted 用 reuse_task_id 起新 Worker、resumable 续同一会话、旧 journal 兼容 |
+| 附件引用 | `test/attachment-refs.test.mjs` | `msg:last` / `msg:last:<i>` / `msg:<id>` / `msg:<id>:<i>` 解析、越界 part、失效引用、限额、复制失败整体拒绝 |
 | 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP 18 条路由、无 cwd ensure、项目清单、租约、重置 generation/Worker 归档、多实例隔离/单锚点/未读 |
 | 实例 | `test/instances.test.mjs` | 默认迁移、创建/重命名、独立 home、未读持久化、损坏注册表降级 |
 | 模型 | `test/models.test.mjs` | 目录展开、allowlist、`onlyProvider`/`onlyNames`、默认选择、effort 校验、空匹配警告 |
@@ -682,7 +683,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 326 个用例，全部不需要模型调用。
+共 356 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录

@@ -244,6 +244,38 @@ Worker 默认隔离；同一项目里的连续工作可以复用已有上下文�
 - 需要独立并行或跨项目时不要复用，直接创建新 Worker；
 - 旧任务保持为独立活动记录；关闭其中一个不会掐掉仍被其他任务共享的 Worker。
 
+## 附件（dispatch / steer）
+
+`superagent_dispatch` 和 `superagent_steer` 都能带 `attachments`，三种写法可以混用：
+
+| 写法 | 含义 |
+| --- | --- |
+| `/abs/path/file.png` | 绝对路径，原样使用 |
+| `relative/file.pdf` | 相对 Worker 项目根；不允许越界 |
+| `msg:last`（别名 `msg:latest`） | 当前会话最近一条带附件的用户消息，展开其中全部可引用 part |
+| `msg:last:<partIndex>` | 只取该消息 content 数组的第 `partIndex` 个可引用 part（0 起） |
+| `msg:<messageId>` | 精确引用当前会话里的某条消息 |
+| `msg:<messageId>:<partIndex>` | 精确消息 + part 下标 |
+
+`msg:` 引用由插件通过宿主 attachment service 定位，复制到
+`<dataDir>/attachments/<taskId>/`，再把**副本的绝对路径**交给 Worker；图片用
+`read_image` 读，文件用 `read`。原会话对象、用户源文件和 `~/.dsh` 不直接交给 Worker。
+
+- 限额：展开后最多 8 个文件、每个 10 MiB、合计 30 MiB（`worker.attachments` 可覆盖）。
+- 目录、符号链接、缺失/失效引用、越界 part 和不支持的图片格式（BMP/TIFF/HEIC/AVIF/ICO）
+  都显式报错；复制失败整体拒绝，不会留下半个任务。
+- `steer` 的副本同样落在这一个任务目录下，并在给 Worker 的消息后追加附件绝对路径。
+- 暂存副本不自动清理；本插件没有删除逻辑。
+
+```json
+{
+  "title": "按附件里的链路补回归",
+  "brief": "先看 architecture.png，再补 msg:last 的边界用例。",
+  "project": "dsh-super-agent",
+  "attachments": ["msg:last", "msg:last:1"]
+}
+```
+
 ## 中途指令
 
 任务有 live Worker 时，`superagent_steer`、面板输入框和

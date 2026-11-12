@@ -2,8 +2,25 @@
 
 ## Unreleased
 
+### Added
+
+- **会话附件引用（P1-d）**：`superagent_dispatch` / `superagent_steer` 的
+  `attachments` 新增 `msg:last` / `msg:last:<partIndex>` / `msg:<messageId>` /
+  `msg:<messageId>:<partIndex>`，可直接引用当前 Router 会话里粘贴或上传的图片与
+  文件；插件通过宿主 attachment service 定位对象，复制到自己的暂存目录，再把绝对
+  路径交给 Worker，无需用户先另存文件。绝对/相对路径、限额和既有错误语义不变；失效
+  引用、越界 part、缺失对象均显式报错。详见 `docs/p1d.json`，回归：
+  `test/attachment-refs.test.mjs`。
+
 ### Changed
 
+- **README 重写与截图更新（P1-g）**：README 改为「定位一句话 → 亮点 4 条（插队 steer /
+  会话附件引用 / 任务与丢失判定 / dsh-chatgpt-ui dot 品牌位）→ 安装启用 → 截图 → 文档 →
+  已知限制」；删除已不存在的旧按钮与「dot 模式」说法，补上 `msg:` 附件引用、`lost` 不
+  计入进行中、`starting` 不误判 lost 的宽限判定。截图换成隔离实例（独立 `DSH_HOME`，
+  模拟任务/会话，深色）重拍的 `docs/images/task-status-dark.png`、
+  `worker-report-steer-dark.png`、`attachment-flow-dark.png`；`docs/usage.md` 补附件章节，
+  测试计数更新为 356。
 - **steer 默认插队（P1-b）**：`superagent_steer`、面板和
   `POST /api/super-agent/ui/task/steer` 默认把消息投到 Worker 的 `next-step`，在
   当前 run 的下一次模型步前消费（正在执行的工具调用先安全结束），不再等整轮结束。
