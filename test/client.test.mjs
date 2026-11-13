@@ -78,7 +78,11 @@ test('client shows the live activity rail and hides Worker sessions', () => {
   assert.match(client, /resetConfirm/)
   assert.match(client, /resetNote/)
   assert.match(client, /workspaceSessions/)
-  assert.match(client, /b\.createdAt/)
-  assert.match(client, /rows\.length > limit/)
+  assert.match(client, /activityListNext/)
+  assert.match(client, /loadActivityMore/)
+  assert.match(client, /ACTIVITY_PAGE_SIZE = 20/)
+  assert.match(client, /sa-activity-collapse/)
+  // 排序在数据层（runtime/activity.js），面板不再二次排序。
+  assert.doesNotMatch(client, /rows\.slice\(\)\.sort/)
   assert.match(client, /async function reset|const reset = React\.useCallback/)
 })
