@@ -9,12 +9,12 @@
   `msg:<messageId>:<partIndex>`，可直接引用当前 Router 会话里粘贴或上传的图片与
   文件；插件通过宿主 attachment service 定位对象，复制到自己的暂存目录，再把绝对
   路径交给 Worker，无需用户先另存文件。绝对/相对路径、限额和既有错误语义不变；失效
-  引用、越界 part、缺失对象均显式报错。脱敏格式样例见 `docs/evidence-sample.json`
-  （完整证据留在本机 `docs/p1*.json`，已 gitignore，不入库），回归：
+  引用、越界 part、缺失对象均显式报错。证据样例只在本机留存（不入库），回归：
   `test/attachment-refs.test.mjs`。
 
 ### Changed
 
+- **文档规范收口**：README 改为「定位 → 截图 → 安装 → 兼容性 → 能力 → 用法 → 限制 → 文档 → 隐私 → 许可」，安装改用 `github:TianzeLuo/dsh-super-agent`；补齐顶层 `engines.dsh`（`>=0.2.1`）；证据 JSON 与 DOM dump 不再入库（本机保留）。
 - **README 重写与截图更新（P1-g）**：README 改为「定位一句话 → 亮点 4 条（插队 steer /
   会话附件引用 / 任务与丢失判定 / dsh-chatgpt-ui dot 品牌位）→ 安装启用 → 截图 → 文档 →
   已知限制」；删除已不存在的旧按钮与「dot 模式」说法，补上 `msg:` 附件引用、`lost` 不

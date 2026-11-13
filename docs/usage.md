@@ -40,7 +40,7 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
   会话，旧会话隐藏后不应继续唤醒）、切换新的 dataDir generation、创建新 Router；
   旧 Worker 归档，旧 Router 会话保留但隐藏。长期约定文件不随 Reset 丢失。
 - Worker Session 不出现在侧栏，`[super-agent]` 内部 trigger 不出现在聊天流。
-- 点通知（`dsh-away-notify`）会回到产生它的**实例 + 会话**：选中面板 → 切实例 →
+- 点通知（[dsh-away-notify](https://github.com/TianzeLuo/dsh-away-notify)）会回到产生它的**实例 + 会话**：选中面板 → 切实例 →
   adopt 那条会话。成功定位不弹顶部提示（跳转本身已说明结果）；只有认不出会话或
   切换实例失败时才给一条提示。已经在那个实例/面板上也照样定位。
   点通知直接打开面板并定位到对应实例/会话，行为与普通会话一致（走 away-notify 原生
@@ -82,7 +82,7 @@ commandcode）。每条可以写：
       {
         "id": "flash",
         "label": "DeepSeek-Flash",
-        "provider": "dsh-provider-qoder",
+        "provider": "<provider-id>",
         "model": "dfmodel",
         "efforts": ["low", "high", "max"],
         "defaultEffort": "high",
@@ -108,7 +108,7 @@ commandcode）。每条可以写：
 ```json
 {
   "models": {
-    "onlyProvider": "dsh-provider-qoder",
+    "onlyProvider": "<provider-id>",
     "onlyNames": ["DeepSeek-Flash", "Qwen3.8-Flash", "GLM-5.3-Flash"],
     "default": "",
     "defaultEffort": ""
@@ -202,7 +202,7 @@ objective 是**被动**的，只有三种推进来源：
 ```json
 {
   "action": "create",
-  "objective": "把 dsh-chatgpt-ui 的 M2 交付完",
+  "objective": "把界面改版的 M2 交付完",
   "milestones": ["接入流式消息", "补齐错误态", "通过 Playwright 回归"],
   "every_seconds": 3600
 }
@@ -217,7 +217,7 @@ objective 是**被动**的，只有三种推进来源：
 - `import` 把当前会话里已有的宿主 goal 迁移成 manual 节奏的目标（宿主 goal 保持
   暂停，并被 disarm，不再续轮）。Router 启动时也会自动做一次同样的迁移（幂等：
   同一个 hostGoalId 只迁一次，已完成的 goal 不迁），所以之前 paused 的
-  dsh-chatgpt-ui 交付目标会被自动接管，不需要额外操作。
+  交付目标会被自动接管，不需要额外操作。
 
 节奏选择器和 `superagent_schedule` 一样：`every_seconds`（≥60）、`at`、`daily`、
 `weekly`、`cron`。`daily`/`weekly`/`cron` 的墙钟计算交给宿主，目标只保存它返回的

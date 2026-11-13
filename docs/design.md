@@ -87,12 +87,12 @@
 12. **事件正文默认脱敏**：`redact: true` 时，常见 key/token 在进入 journal 前被替换。
 13. **失败不连坐**：配置错误、目录不可写、端口被占、服务缺失，都只让插件对
     本次会话保持关闭，不影响 `agent/created`。
-14. **Worker 的通知抑制由创建方登记**：worker 是普通 Session，`dsh-away-notify`
+14. **Worker 的通知抑制由创建方登记**：worker 是普通 Session，[dsh-away-notify](https://github.com/TianzeLuo/dsh-away-notify)
     只能按标题前缀兜底识别，用户一改名就失效。因此创建 worker 时调
     `awayNotify.markInternal(sessionId, 'super-agent-worker')`（`lib/internal-sessions.js`），
     关闭/归档/agent 销毁时释放；`awayNotify` 缺席或没有该方法时**静默降级**，
     worker 创建/关闭完全不受影响，通知侧退回标题前缀。
-14. **面板来源由面板插件显式登记**：`dsh-away-notify` 点通知时要判断「这条会话在哪个
+14. **面板来源由面板插件显式登记**：[dsh-away-notify](https://github.com/TianzeLuo/dsh-away-notify) 点通知时要判断「这条会话在哪个
     主区域面板里」，否则只能靠启发式——面板被选中后 15 秒内第一个新出现的 retain 来源。
     面板从没打开过、或同时有别的插件 retain 会话时，启发式会认错。因此浏览器半部在
     `apply` 时调 `awayNotifyPanels.register({ panelId: 'super-agent', sources: ['superAgentUi'] })`
@@ -137,7 +137,7 @@
     抽屉固定贴面板右侧（520/640、`top/bottom: 0`、正文自己滚动），不画遮罩，
     `Esc`/✕/点外部关闭，`z-index` 在内容之上、宿主对话框之下。
 22. **点通知必须定位到「实例 + 会话」，不能只选面板**：面板把 `panelId`、retain 来源
-    与 `showSession` 一起注册给 `dsh-away-notify`。`showSession` 固定三步：`selectPanel`
+    与 `showSession` 一起注册给 [dsh-away-notify](https://github.com/TianzeLuo/dsh-away-notify)。`showSession` 固定三步：`selectPanel`
     → 用 `/ui/state` 的 `routers` 把会话映射到实例 → 切实例（`/ui/instances/active` +
     ensure）并 adopt 会话；**没有「已经在了就早退」**，否则多实例下就是「点了没反应」
     （away-notify 只认会话，不认实例）。它在 `selectPanel` 之后**同步**回调，面板可能还
@@ -564,7 +564,7 @@ cwd/project、workerSessionId、status、objectiveId、model、createdAt/updated
 | Worker 越权 | Router 项目内 subagent；项目外普通 Session，落在目标项目的 workspace-write 根；UI 的 Router 在独立 workspace，所以用户项目任务都用普通 Session；提示词要求不直接联系人、不臆造批准 | Worker 仍有完整工具，不是沙箱；普通 Session 使用宿主默认审批 |
 
 Windows 上 `%LOCALAPPDATA%\dsh-super-agent\workspace` 是合法默认数据根，
-因此不把整个 `C:\Users` 当作系统目录；账户自己的 `~/.dsh` 仍单独拒绝。
+因此不把整个用户目录当作系统目录；账户自己的 `~/.dsh` 仍单独拒绝。
 Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/ProgramData 仍拒绝。
 
 文章 §8.4 的「凭据不进入模型上下文」在本插件里是**设计约束**，不是强制机制：
@@ -631,7 +631,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 - 不要在浏览器里直接写 journal；所有写入走 runtime/ensure；
 - 不要把 Router 会话换成自定义消息协议；继续用 `conversation.content`，否则会丢掉
   工具、审批、停止与模型选择。
-- 面板的 retain 来源（`PANEL_SOURCE`）同时用于 `sessions.retain()` 和向 `dsh-away-notify`
+- 面板的 retain 来源（`PANEL_SOURCE`）同时用于 `sessions.retain()` 和向 [dsh-away-notify](https://github.com/TianzeLuo/dsh-away-notify)
   的 `awayNotifyPanels.register()` 登记；改来源名或面板 key 时改常量，别在别处写死名字
   （见不变量 14）。
 

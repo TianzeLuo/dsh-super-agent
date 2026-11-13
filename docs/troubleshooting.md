@@ -11,7 +11,7 @@
   `window.__SA_NAV_LOG__`。
 - 导航守卫默认关，仅 `localStorage['dsh.super-agent.navGuard']='on'` 时启用诊断式拦截；
   复现脚本 `node test/manual/repro-panel-yank.mjs --navdebug`。
-- 通知依赖 `dsh-away-notify`；没装时不会弹系统通知，但面板与任务不受影响。
+- 通知依赖 [dsh-away-notify](https://github.com/TianzeLuo/dsh-away-notify)；没装时不会弹系统通知，但面板与任务不受影响。
 
 ## 面板出现两份 / 热重载后行为怪
 

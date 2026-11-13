@@ -4,9 +4,10 @@
 
 - `lib/index.js` — 宿主半部：实例注册、Router/Worker、工具、Trigger、journal。
 - `lib/client.js` — 浏览器半部（单文件 bundle）：面板、实例切换、预览、通知落点。
-- `lib/*.js` — 纯逻辑模块（attendance、instances、objectives、agreements…）。
+- `lib/*.js` — 纯逻辑模块（attendance、instances、objectives、agreements…）；
+  `lib/prompt.js` 组织 Router/Worker 提示词。
 - `test/` — Node 单元/集成测试；`test/client-bundle.mjs` 在 Node 里加载 client bundle。
-- `cordis.patch.yml` — profile 挂载行；`prompts/` — Router/Worker 提示词。
+- `cordis.patch.yml` — profile 挂载行。
 
 ## 本地开发
 
@@ -38,8 +39,8 @@ npm test
 - **只装本插件**：宿主加载 `cordis.patch.yml` → 注册 `main` 的 `super-agent` 槽与
   `conversation.input.left` 徽标；`awayNotify`、`awayNotifyPanels`、`uiWorkspace`、
   `layout` 全部走 `ctx.inject` 可选探测（`lib/index.js`、`lib/client.js`）。
-- **同时装 dsh-chatgpt-ui**：它的 dot 分段只在探测到 `super-agent` 槽时出现；本插件
-  不知道皮肤是否存在，也不依赖它的类名/令牌（`test/independence.test.mjs` 断言）。
+- **不依赖任何皮肤插件**：面板只注册自己的槽，不引用别的插件的类名、令牌或配置
+  （`test/independence.test.mjs` 断言）。
 - **证据**：`test/independence.test.mjs`（3 项）；隔离实例
   `DSH_HOME=/tmp/dsh-indep-sa dsh web --port 3099` 启动 HTTP 200，boot combo 只含
   `dsh-super-agent/client.js`，服务端日志无 error。

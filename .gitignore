@@ -3,7 +3,7 @@ node_modules/
 *.log
 .scratch/
 
-# 本机验证证据与真实数据截图：只留本机，不入库（P2-d 隐私清理）
-docs/p1*.json
-docs/screenshots/p1*.png
-docs/screenshots/preview-hw7-*
+# 本机验证证据与采集产物：只留本机，不入库（P2-d / P2-j2 隐私清理）
+# 证据 JSON、DOM dump、采集截图都不进仓库；docs/ 里只保留散文 .md 与经审的 docs/images/
+docs/*.json
+docs/screenshots/
