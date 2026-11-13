@@ -4,6 +4,7 @@
 
 ### Added
 
+- **默认 Worker 模型集合**：模型面板可把当前勾选「设为默认」，新实例和新会话继承该集合；目录中已消失的模型会被静默跳过。
 - **会话附件引用（P1-d）**：`superagent_dispatch` / `superagent_steer` 的
   `attachments` 新增 `msg:last` / `msg:last:<partIndex>` / `msg:<messageId>` /
   `msg:<messageId>:<partIndex>`，可直接引用当前 Router 会话里粘贴或上传的图片与
@@ -11,6 +12,10 @@
   路径交给 Worker，无需用户先另存文件。绝对/相对路径、限额和既有错误语义不变；失效
   引用、越界 part、缺失对象均显式报错。证据样例只在本机留存（不入库），回归：
   `test/attachment-refs.test.mjs`。
+
+### Fixed
+
+- 近期活动改为进行中优先、组内最新在前，并按游标分批加载；标题计数显示总数，新增收起按钮，展开恢复默认 20 条。
 
 ### Changed
 

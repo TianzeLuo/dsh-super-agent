@@ -15,8 +15,11 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 ## UI
 
 - 直接输入任务；Router 通过 `superagent_projects` 选择项目并派 Worker。
-- 右侧「近期活动」按更新时间倒序展示进行中和已结束的任务；默认 6 条，点
-  「显示更多」展开。每条显示状态、项目和时间。
+- 右侧「近期活动」把进行中（queued / starting / working / 等待审批）排在
+  已完成、已关闭之前；两组内部都按最近更新倒序。标题计数始终是**总数**，
+  默认展示 20 条，点「显示更多」每次追加 20 条，加载完显示「已全部加载」。
+  标题右侧的收起按钮只保留标题行，再点展开恢复默认 20 条。排序在数据层完成，
+  分页时同一时间戳的任务也不会跳位。
 - 点任务在右侧活动栏打开详情卡：状态、项目、模型/思考强度、Worker 是否在线、Brief、
   报告（倒序）、关联线程。卡片顶部 `‹` 返回列表，`✕` 关闭；详情占满右侧活动栏，
   不向对话区扩展，因此不会压到底部输入框。
@@ -30,6 +33,8 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 - 顶部只保留一个「Worker 模型」按钮，打开统一面板：
   - 逐个勾选（点击模型名或复选框）允许 Router 使用的模型；
   - 每个模型可以限制 reasoning efforts，并指定默认模型/effort；
+  - 勾选后点「设为默认」，把这组勾选存成**默认 Worker 模型集合**；新实例和
+    新会话直接继承，不再默认全选；
   - 「全部启用」是快捷方式，跟随宿主目录，不是唯一选项；保存写到项目配置。
 - 面板、活动详情、模型/规则/定时抽屉全部使用 DSH 主题 token，跟随系统或宿主切换浅色/深色；
   下拉项也是自绘菜单，深色下不会出现白底的原生弹层。
@@ -71,9 +76,8 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 
 ## Worker 模型与思考强度
 
-`models.allowed` 是 Router 唯一可选的 Worker 模型集合；为空时跟随宿主目录。
-默认就是“宿主目录全部模型”（当前这台机器是 11 个：Qoder、DeepSeek、DeepSeek Account、
-commandcode）。每条可以写：
+`models.allowed` 是 Router 唯一可选的 Worker 模型集合；为空时优先用
+`models.defaults`（默认 Worker 模型集合），再为空才跟随宿主目录。每条可以写：
 
 ```json
 {
@@ -89,6 +93,7 @@ commandcode）。每条可以写：
         "note": "日常默认，快"
       }
     ],
+    "defaults": [],
     "default": "flash",
     "defaultEffort": "high"
   }
@@ -115,6 +120,18 @@ commandcode）。每条可以写：
   }
 }
 ```
+
+### 默认 Worker 模型集合
+
+面板「Worker 模型」里勾选要用的模型，点「设为默认」即可。保存的是
+`models.defaults`（每项至少 `provider` + `model`），不会改写 `allowed`：
+
+- 当前实例：写入它自己的 `.dsh/super-agent.json`，下一条 dispatch / 新会话立即生效；
+- profile 级：同时写入默认实例的配置，新建实例时复制进新实例的配置；
+- `allowed` 非空时仍以 `allowed` 为准；`allowed` 为空且 `defaults` 非空时，
+  只暴露默认集合里的模型；
+- 宿主目录或来源过滤里已经消失的条目会被静默跳过，保留其余条目；全部消失时
+  可调用集合为空，不会回退成“全部模型”。
 
 `onlyNames` 同时匹配 model id 和显示名，顺序即默认模型优先级；`allowed` 非空
 时以显式 allowlist 为准。过滤后的目录也会限制面板，不会在 UI 里冒出其它渠道；
@@ -343,10 +360,11 @@ node bin/super-agent.mjs config
 | POST | `/api/super-agent/ui/ensure` | 确保 Router；body 可省略，或传 `{"cwd":"/abs/project"}` |
 | POST | `/api/super-agent/ui/focus` | 兼容旧脚本的 focus 设置 |
 | POST | `/api/super-agent/ui/reset` | 中止并归档 Worker、取消定时任务、切换 generation、创建新 Router |
-| GET | `/api/super-agent/ui/activity?limit=N` | 近期活动（含已结束），`limit` 最大 50 |
+| GET | `/api/super-agent/ui/activity?limit=N&cursor=…` | 近期活动（含已结束）。进行中优先；`limit` 默认 20、最大 500，返回 `total` / `nextCursor` / `hasMore` |
 | GET | `/api/super-agent/ui/task?task_id=…` | 单个任务详情：Brief、报告、线程、Worker 是否在线 |
 | POST | `/api/super-agent/ui/task/steer` | 给在线 Worker 发一条指令，body `{task_id,text,interrupt?}`；`interrupt` 默认 true（插队到当前 run 的下一步），false 为排队；`mode:"queue"` 是等价别名 |
 | GET/POST | `/api/super-agent/ui/models` | 读/写 Worker 模型 allowlist 和默认选择 |
+| POST | `/api/super-agent/ui/models/default` | 保存默认 Worker 模型集合，body `{"defaults":[{provider,model,…}]}` |
 | GET/POST | `/api/super-agent/ui/agreements` | 读/写长期工作约定 |
 | GET/POST | `/api/super-agent/ui/schedules` | 读/建定时唤醒 |
 | POST | `/api/super-agent/ui/schedules/run` | 立即执行一次某条定时任务 |
@@ -405,6 +423,7 @@ node bin/super-agent.mjs config
 
   "models": {
     "allowed": [],
+    "defaults": [],
     "default": "",
     "defaultEffort": "",
     "onlyProvider": "",
@@ -450,9 +469,13 @@ node bin/super-agent.mjs config
   queued 任务自动补位。idle Worker 可供 steer/Thread 直通。
 - `channels.<name>.maxWords`：`superagent_tell` 硬上限；`0` 表示不限。
 - `redact`：进入 journal 前遮盖常见 key/token；不是安全边界。
-- `models.allowed`：Router 唯一可选的 Worker 模型；空数组时按 `onlyProvider` /
-  `onlyNames` 过滤，再空则跟随宿主全部目录。面板会显示过滤原因和
-  “DSH 共 N 个”的总数。`default` 必须是 allowlist 里的 `id` 或 `provider/model`。
+- `models.allowed`：Router 唯一可选的 Worker 模型；空数组时优先按
+  `models.defaults`，没有再按 `onlyProvider` / `onlyNames` 过滤，最后才跟随宿主
+  全部目录。面板会显示过滤原因和“DSH 共 N 个”的总数。`default` 必须是 allowlist
+  里的 `id` 或 `provider/model`。
+- `models.defaults`：面板「设为默认」保存的默认集合，每项 `{provider, model}`
+  加可选 `id/label/efforts/defaultEffort`。新实例会继承；目录里已不存在的项静默
+  跳过，不会因为缺一项就回退成全部模型。
 - `models.defaultEffort`：默认思考强度；为空用模型自己的默认。
 - `approval.mode`：`ask` / `auto-workspace` / `deny-all`；本版本只记录，不自动
   回答。`watchdog.approvalTimeoutMs` 是审批等待升级时间（默认 60000ms）。

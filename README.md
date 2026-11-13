@@ -45,6 +45,7 @@ dsh plugin --profile web add github:TianzeLuo/dsh-super-agent
 - **插队 steer**：给在线 Worker 补一句话，默认在它的下一个模型步生效，不必等整轮跑完。
 - **会话附件引用**：当前 Router 会话里粘贴或上传的图片、文件可直接交给 Worker，不用先另存。
 - **任务看板与定时唤醒**：进行中 / 已丢失 / 等待审批分得清；到点自动唤醒 Router 继续。
+- **默认 Worker 模型集合**：在模型面板勾选后「设为默认」，新实例和新会话继承，不再默认全选。
 
 ## 用法
 

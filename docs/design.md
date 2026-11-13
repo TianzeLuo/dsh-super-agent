@@ -108,6 +108,7 @@
     不再向对话区扩展，因此不会与底部 composer 重叠；设置抽屉仍可覆盖对话区。
 17. **默认 Worker 模型只在抽屉里设置**：顶栏只保留一个「Worker 模型」入口，
     抽屉内逐项勾选模型、设置默认模型和 effort；不再维护第二套 header 快捷选择器。
+    勾选后「设为默认」写入 `models.defaults`，新实例继承同一集合，不再默认全选。
     来源过滤是可选的；激活时抽屉必须同时显示「当前 N / DSH 共 M」和一键清空
     `onlyProvider`/`onlyNames` 的入口，避免用户误以为宿主只有 N 个模型。
     每行模型的第一行是模型名 + 右侧启用标识；来源 `Provider/model` 单独占一行，
@@ -123,6 +124,10 @@
 20. **目标不自动续轮**：原生 objective 只在三种来源推进（到点检查 / Worker 报告 /
     用户指令）；创建或更新目标不产生 trigger、不 followup、不排 0 延迟调度。宿主 goal
     在 Router 会话里被 restrict + guard + disarm，普通会话不变。
+22. **活动顺序与分页只认数据层**：进行中（queued/starting/working/blocked-approval）
+    排在已完成/已关闭之前，组内 `updatedAt` 倒序、同时间戳 `id` 倒序；HTTP 用
+    不透明游标分批，面板只切片不排序。标题计数永远是总数，收起后展开恢复默认
+    20 条，避免“展开=全部”把 100+ 行一次塞进 DOM。
 21. **面板里的文件预览复用官方渲染器，但不假装有右侧栏**：面板占着 `main` 槽，
     `layout.panelInfo.activePanelId` 非空，ui-sidebar-right 的座位整体 `hidden`
     （`visible = activePanelId === null`），`openResource` 的 `require()` 也拿不到屏上
@@ -351,10 +356,11 @@ queued 任务立即补位；否则 Router 不主动 `close` 时队列会永久�
 
 模型选择在**派工时**固定，不在 Worker 运行中漂移：
 
-1. `normalizeModelConfig` 把显式 `allowed` 或来源过滤（`onlyProvider` /
-   `onlyNames`）折成统一目录；空目录表示跟随宿主全部模型。
+1. `normalizeModelConfig` 把显式 `allowed`、`defaults` 或来源过滤
+   （`onlyProvider` / `onlyNames`）折成统一目录；`allowed` 为空时先看
+   `defaults`，都为空才跟随宿主全部模型。目录里已消失的默认项静默跳过，保留其余项。
 2. `resolveModelSelection` 解析任务请求：显式 `model`/`reasoning_effort` 优先，
-   否则用 allowlist 默认，再否则用宿主默认/第一个可用模型。
+   否则用默认集合/allowlist 默认，再否则用宿主默认/第一个可用模型。
 3. 校验 effort 是否在模型允许集合内；不允许直接抛错，不静默降级。
 4. 跨项目 Worker 在 `sessionController.create` 之后调用
    `selectModel({sessionId, ...})`；subagent 则把 `agentOptions` 放进
@@ -666,7 +672,8 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 附件引用 | `test/attachment-refs.test.mjs` | `msg:last` / `msg:last:<i>` / `msg:<id>` / `msg:<id>:<i>` 解析、越界 part、失效引用、限额、复制失败整体拒绝 |
 | 接线 | `test/plugin.test.mjs` | 工具/提示词、单 Router、subagent 跳过、HTTP 18 条路由、无 cwd ensure、项目清单、租约、重置 generation/Worker 归档、多实例隔离/单锚点/未读 |
 | 实例 | `test/instances.test.mjs` | 默认迁移、创建/重命名、独立 home、未读持久化、损坏注册表降级 |
-| 模型 | `test/models.test.mjs` | 目录展开、allowlist、`onlyProvider`/`onlyNames`、默认选择、effort 校验、空匹配警告 |
+| 活动 | `test/activity.test.mjs` | 进行中优先、同时间戳 tie-break、游标分批、总数 |
+| 模型 | `test/models.test.mjs` | 目录展开、allowlist、默认集合、`onlyProvider`/`onlyNames`、默认选择、effort 校验、空匹配警告 |
 | 约定 | `test/agreements.test.mjs` | 全局/项目、append/replace、损坏文件、上限、注入文本 |
 | 功能 | `test/features.test.mjs` | 模型派工、复用冲突、跨项目模型、约定注入、任务详情/活动、定时桥 |
 | 目标 | `test/objectives.test.mjs` | 创建不唤醒、cadence→schedule、Worker 报告推进、到点检查推进、关闭取消调度、节奏替换、宿主 goal 迁移、journal 回放 |
@@ -726,11 +733,11 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
    `bash` 的 `pwd` 是 project6，`printf > .super-agent-probe.txt` 成功写进 project6；
    UI 的 Router 在独立 workspace，所以这次任务走普通 Session（不是 subagent）。
 6. 连续发 3 个慢任务，中间快照 `working=3`，报告随后逐条回到 Router，验证真实
-   Worker 并发与容量限制；右侧活动列表按更新时间显示任务状态。
+   Worker 并发与容量限制；右侧活动列表进行中优先、组内按更新时间显示任务状态。
 7. 5 个慢任务时前 4 个 `working`、第 5 个 `queued`；第 4 个完成后第 5 个自动
    `working`，最终全部 `idle`，证明 idle 不占执行槽位。
 8. `reuse-worker` 连续两阶段任务：两个 task 的 `workerSessionId` 相同，第二个带
-   `continuedFrom`；两个都完成后活动栏按创建时间倒序同时显示 Completed。
+   `continuedFrom`；两个都完成后活动栏按更新时间倒序同时显示 Completed。
 9. Worker Session 行、旧 Router 行和 `[super-agent]` trigger 用户气泡在浏览器中
    不可见；Worker 结果只进入右侧活动列表和 Router 的最终回复。
 10. 点击「重置」：二次确认，切换新 dataDir generation，新会话空白、活动列表清空；
