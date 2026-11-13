@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { fakeModels, fakeProject, setupRuntime, tick } from './fake-host.mjs'
+import { fakeLegacySchedule, fakeModels, fakeProject, setupRuntime, tick } from './fake-host.mjs'
 import { createTools } from '../lib/tools.js'
 
 const catalog = {
@@ -192,18 +192,38 @@ test('scheduled tasks create, list, cancel and run immediately', async () => {
   })
   assert.equal(created.ok, true)
   assert.match(created.schedule.id, /^sched_/)
+  // 0.2.2 宿主级 API：typed timing + 本会话投递目标，创建者作为 actor 记入 involved。
+  assert.deepEqual(ctx.schedule.calls.create[0].request.timing, { kind: 'after', after_seconds: 120 })
+  assert.deepEqual(ctx.schedule.calls.create[0].request.target, { kind: 'session', sessionId: ctx.router.id })
+  assert.equal(ctx.schedule.calls.create[0].actorSessionId, ctx.router.id)
   assert.match(ctx.schedule.records.get(created.schedule.id).prompt, /\[super-agent scheduled task\]/)
   assert.match(ctx.schedule.records.get(created.schedule.id).prompt, /Project: parser/)
   const list = await ctx.runtime.scheduleView(true)
   assert.equal(list.available, true)
   assert.equal(list.schedules.length, 1)
   assert.equal(list.schedules[0].kind, 'after')
+  assert.equal(list.schedules[0].state, 'active')
   const ran = await ctx.runtime.runScheduleNow(created.schedule.id)
   assert.equal(ran.ok, true)
   assert.equal(ctx.store.pendingTriggers().length, 1)
   await ctx.runtime.cancelSchedule(created.schedule.id)
+  assert.deepEqual(ctx.schedule.calls.edit.at(-1).request, { id: created.schedule.id, action: 'delete' })
   const after = await ctx.runtime.scheduleView(true)
   assert.equal(after.schedules.length, 0)
+})
+
+test('a pre-0.2.2 per-session schedule service still creates, lists and cancels', async () => {
+  const ctx = setupRuntime({ schedule: fakeLegacySchedule() })
+  await tick()
+  const created = await ctx.runtime.createSchedule({ title: 'Legacy host', prompt: 'Check in.', every_seconds: 600 })
+  assert.match(created.schedule.id, /^sched_/)
+  assert.equal(created.schedule.state, 'scheduled')
+  const list = await ctx.runtime.scheduleView(true)
+  assert.equal(list.available, true)
+  assert.deepEqual(list.schedules.map((row) => row.id), [created.schedule.id])
+  await ctx.runtime.cancelSchedule(created.schedule.id)
+  assert.equal((await ctx.runtime.scheduleView(true)).schedules.length, 0)
+  assert.equal(ctx.schedule.records.size, 0)
 })
 
 test('reset-style cancelAllSchedules clears every active reminder', async () => {

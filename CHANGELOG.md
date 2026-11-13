@@ -43,6 +43,17 @@
 
 ### Fixed
 
+- **DSH 0.2.2 上定时任务与目标检查全部失效**：0.2.2 把 `ctx.schedule` 改成宿主级
+  API（`create({title,prompt,timing,target}, actorSessionId)`、`list` 返回分页对象、
+  `edit({id, action:"delete"})` 取代按会话的 `delete`/`update`），插件桥仍按会话调用，
+  导致列表恒为空、创建必失败、取消不可用，目标的到点检查静默降级。新增
+  `lib/schedule-bridge.js`：用 `edit` 是否存在区分两代，把 0.2.2 的 typed `timing`、
+  会话归属过滤（`target`/`involvedSessionIds`）、`edit` 删除和 0.2.1 的按会话
+  `create/list/delete` 统一成 runtime 认识的一种视图；缺服务时如实报告
+  `unavailable`，不再显示空列表。objective 的墙钟 cadence 在没记时区时补默认时区
+  （0.2.2 要求显式时区）。回归：`test/schedule-bridge.test.mjs`（两代线上形状、
+  归属过滤、暂停任务、缺服务）、`test/features.test.mjs`（0.2.2 与 0.2.1 端到端
+  各一条）、`test/objectives.test.mjs`（无时区 cadence 补默认时区）。
 - **DSH 0.2.2 上派工必然失败（#2）**：宿主把 `subagents.startActivation` 的 spec 从
   「任务字段放在 `spec.request` 里」改成扁平结构，并在创建 child 之前直接读
   `spec.parent.id`；`#spawnTask` 仍只传旧形状，于是每个任务都落 `failed` 且没有

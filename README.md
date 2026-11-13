@@ -41,7 +41,9 @@ Super-agent Workspace，不需要先选项目。项目要启用时，在项目�
 会话或切换实例失败时才提示。
 
 宿主兼容 DSH 0.2.1 与 0.2.2（含 rc）：`subagents.startActivation` 的 activation spec
-同时提供 0.2.2 的扁平字段和 0.2.1 的 `request` 别名，同一份代码两代宿主都能派工。
+同时提供 0.2.2 的扁平字段和 0.2.1 的 `request` 别名；`ctx.schedule` 由
+`lib/schedule-bridge.js` 同时适配 0.2.1 的按会话 API 与 0.2.2 的宿主级 API
+（typed `timing`、分页 `list`、`edit` 删除）。同一份代码两代宿主都能派工与定时唤醒。
 
 ## 截图
 

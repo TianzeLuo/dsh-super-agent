@@ -41,7 +41,7 @@
 | Tools | `lib/tools.js` | 十个模型工具（状态/召回/项目/派工/模型/定时/约定/指令/汇报/关闭） | 不直接改 journal |
 | Models | `lib/models.js` | 目录展开、allowlist/来源过滤、默认选择、effort 校验 | 不调模型 |
 | Agreements | `lib/agreements.js` | 长期约定的持久化、作用域合并、提示词注入 | 不执行工具 |
-| Schedule bridge | `lib/index.js` / `lib/runtime.js` | 把宿主 `ctx.schedule` 暴露成工具和 UI | 不自己计时 |
+| Schedule bridge | `lib/schedule-bridge.js` | 把宿主 `ctx.schedule` 暴露成工具和 UI；兼容 0.2.1 按会话与 0.2.2 宿主级两代契约 | 不自己计时 |
 
 依赖方向是单向的：`runtime → store / filter / render / recall / config`；
 `index → runtime / tools / prompt / store`。`store`、`filter`、`render`、`recall`
@@ -659,6 +659,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | Store | `test/store.test.mjs` | 折叠、去重、订阅、报告、重放、坏行 |
 | Render | `test/render.test.mjs` | 摘要、预算、Worker 提示、字数、脱敏 |
 | Recall | `test/recall.test.mjs` | 一跳链接、截断、report/reply/batch |
+| Schedule 桥 | `test/schedule-bridge.test.mjs` | `timing` 形状映射、会话归属判定、0.2.2 宿主级 create/catalog/edit、0.2.1 按会话 create/list/delete、服务缺失 |
 | Runtime | `test/runtime.test.mjs` | 合批、直通、多订阅、报告、steer、close、槽位、idle 释放槽位、Worker 复用、watchdog、恢复、inbox、outbox、speculative、跨项目 Session Worker、project 解析、activation spec 双形状（0.2.2 扁平 / 0.2.1 `request`） |
 | 审批阻塞 | `test/approval.test.mjs` | `approval/asked`→`blocked-approval`+Router trigger、幂等、`approval/decided` 恢复、60s watchdog 升级一次、策略解析/建议、B 阶段 answerer 工厂、journal 回放 |
 | 重启恢复 | `test/recovery.test.mjs` | 重建 runtime 读回全部任务、会话在→resumable、会话没了→interrupted、closed 不复活、interrupted 用 reuse_task_id 起新 Worker、resumable 续同一会话、旧 journal 兼容 |
@@ -683,7 +684,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 358 个用例，全部不需要模型调用。
+共 366 个用例，全部不需要模型调用。
 
 
 ## 17. 端到端验证记录

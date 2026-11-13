@@ -170,7 +170,10 @@ dataDir 里，所以 Reset 不会丢。条目：
 ## 定时任务
 
 使用宿主 `@deepseek-ai/dsh-schedule`（`ctx.schedule`），不是插件自己的计时器。
-到点后宿主向 Router 投递一条 reminder，Router 被唤醒并自行判断是否派活。支持：
+到点后宿主向 Router 投递一条 reminder，Router 被唤醒并自行判断是否派活。
+`lib/schedule-bridge.js` 同时适配两代宿主契约：0.2.1 及更早的按会话
+`create/list/delete`，0.2.2 起的宿主级 `create({title,prompt,timing,target})`、
+分页 `list` 与 `edit({id, action:"delete"})`；旧宿主照常可用。支持：
 
 - `after_seconds`：N 秒后一次；
 - `at`：绝对时间（RFC3339）；

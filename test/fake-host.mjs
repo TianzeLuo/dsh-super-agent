@@ -16,6 +16,7 @@ import { join } from 'node:path'
 
 import { DEFAULTS, mergeConfig } from '../lib/config.js'
 import { SuperAgentRuntime } from '../lib/runtime.js'
+import { createScheduleBridge } from '../lib/schedule-bridge.js'
 import { Store } from '../lib/store.js'
 
 /** 极小事件总线。 */
@@ -262,13 +263,81 @@ export function fakeModels(catalog = { groups: [], failures: [] }, defaultSelect
   }
 }
 
-/** 假宿主 schedule 服务；只实现 runtime 用到的 create/list/delete。 */
+/** 把假宿主收到的 timing 投影成 v2 记录字段。 */
+function fakeTimingFields(timing = {}) {
+  const now = Date.now()
+  if (timing.kind === 'after') return { afterSeconds: timing.after_seconds, scheduledAt: new Date(now + timing.after_seconds * 1000).toISOString() }
+  if (timing.kind === 'every') return { everySeconds: timing.every_seconds, scheduledAt: new Date(now + timing.every_seconds * 1000).toISOString() }
+  if (timing.kind === 'at') {
+    const at = timing.at
+    const iso = typeof at === 'string' ? at : new Date(now + 60_000).toISOString()
+    return { scheduledAt: iso }
+  }
+  if (timing.kind === 'daily') return { time: timing.daily.time, timeZone: timing.daily.time_zone, scheduledAt: new Date(now + 60_000).toISOString() }
+  if (timing.kind === 'weekly') return { time: timing.weekly.time, weekdays: timing.weekly.weekdays, timeZone: timing.weekly.time_zone, scheduledAt: new Date(now + 60_000).toISOString() }
+  if (timing.kind === 'cron') return { expression: timing.cron.expression, timeZone: timing.cron.time_zone, scheduledAt: new Date(now + 60_000).toISOString() }
+  return { scheduledAt: new Date(now + 60_000).toISOString() }
+}
+
+/**
+ * 假宿主 schedule 服务（DSH 0.2.2 形状）：宿主级、typed timing，用 edit 删除。
+ * 记录形状照 ScheduleCatalogEntry：扁平 kind/时间字段 + status + target + involvedSessionIds。
+ */
 export function fakeSchedule() {
+  const records = new Map()
+  const calls = { create: [], list: [], edit: [] }
+  let next = 0
+  return {
+    records,
+    calls,
+    async catalog() {
+      return [...records.values()]
+    },
+    async list(request = {}) {
+      calls.list.push(request)
+      const items = [...records.values()]
+        .filter((record) => request.active === undefined || (record.status === 'active') === request.active)
+      const limit = request.limit ?? 100
+      const offset = request.offset ?? 0
+      const page = items.slice(offset, offset + limit)
+      return { items: page, shown: page.length, total: items.length, limit, offset }
+    },
+    async create(request, actorSessionId) {
+      calls.create.push({ request, actorSessionId })
+      next += 1
+      const id = `sched_test_${next}`
+      const target = request.target ?? { kind: 'new_once', sessionId: `session-${id}` }
+      const record = {
+        id,
+        title: request.title,
+        prompt: request.prompt,
+        kind: request.timing?.kind ?? 'at',
+        ...fakeTimingFields(request.timing),
+        status: 'active',
+        target,
+        involvedSessionIds: actorSessionId === undefined ? [] : [actorSessionId],
+      }
+      records.set(id, record)
+      return record
+    },
+    async edit(request, actorSessionId) {
+      calls.edit.push({ request, actorSessionId })
+      const record = records.get(request.id)
+      if (record === undefined) return { id: request.id, deleted: false, code: 'schedule_not_found' }
+      if (request.action !== 'delete') throw new Error(`fakeSchedule: unsupported edit action ${request.action}`)
+      records.delete(request.id)
+      return { id: request.id, deleted: true }
+    },
+  }
+}
+
+/** 假宿主 schedule 服务（0.2.1 形状）：按会话 create/list/delete，没有 edit。 */
+export function fakeLegacySchedule() {
   const records = new Map()
   let next = 0
   return {
     records,
-    async list(sessionId) {
+    async list({ sessionId }) {
       return [...records.values()].filter((record) => record.sessionId === sessionId)
     },
     async create(sessionId, request) {
@@ -342,6 +411,8 @@ export function setupRuntime(options = {}) {
   const config = mergeConfig(DEFAULTS, options.config ?? {})
   const models = options.models ?? fakeModels()
   const schedule = options.schedule ?? fakeSchedule()
+  // runtime 只认 schedule-bridge.js 的扁平视图；和真实宿主接线保持一致。
+  const scheduleBridge = options.scheduleBridge ?? createScheduleBridge(() => schedule)
   const now = options.now ?? Date.now
   const runtime = new SuperAgentRuntime({
     agent: router,
@@ -354,7 +425,7 @@ export function setupRuntime(options = {}) {
     attachmentSource: options.attachmentSource,
     projects,
     models,
-    schedule,
+    schedule: scheduleBridge,
     agreementsPath: options.agreementsPath ?? join(project.root, '.dsh', 'super-agent.agreements.json'),
     getAgent: (id) => children.get(id),
     resumeWorker: options.resumeWorker,
@@ -363,7 +434,7 @@ export function setupRuntime(options = {}) {
     now,
   })
   runtime.start()
-  return { ...project, store, children, router, subagents, sessionWorkers, timers, config, runtime, models, schedule }
+  return { ...project, store, children, router, subagents, sessionWorkers, timers, config, runtime, models, schedule, scheduleBridge }
 }
 
 /** 让 microtask 链（startActivation → attachWorker）跑完。 */

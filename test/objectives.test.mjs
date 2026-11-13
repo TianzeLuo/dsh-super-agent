@@ -74,6 +74,16 @@ test('a cadence produces a future check time and a host schedule selector', () =
   assert.equal(nextCheckAt({ kind: 'cron', expression: '0 9 * * *' }, NOW), undefined)
 })
 
+test('a cadence without a zone uses the host zone, since 0.2.2 requires an explicit one', () => {
+  const noZone = createObjectiveRecord({ id: 'obj_5', objective: 'x', cadence: cadenceFromSelectors({ daily: { time: '09:00' } }), now: NOW })
+  assert.equal(noZone.cadence.timeZone, undefined)
+  assert.deepEqual(scheduleSelector(noZone.cadence, 'America/Los_Angeles'), {
+    daily: { time: '09:00', time_zone: 'America/Los_Angeles' },
+  })
+  // 没给默认时区时保持原样，交给宿主拒绝或使用它自己的默认值。
+  assert.deepEqual(scheduleSelector(noZone.cadence), { daily: { time: '09:00' } })
+})
+
 test('cadence selectors reject ambiguous or malformed input', () => {
   assert.throws(() => cadenceFromSelectors({ every_seconds: 10 }), /at least 60/)
   assert.throws(() => cadenceFromSelectors({ every_seconds: 60, daily: { time: '09:00' } }), /at most one/)
