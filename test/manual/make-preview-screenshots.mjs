@@ -121,9 +121,9 @@ function page({ theme, shell, closed, body = 'code', preview = true }) {
               <button type="button" class="icon-button" style="width:auto;padding:0 10px">重试</button>
             </div>`
 
-  // 真实数据：用户报错现场就是这类 .tex 文件（`<local>/code/dsa/homework/hw7.tex`）。
+  // 真实数据：用户报错现场就是这类 .tex 文件（本机路径不入库，用 `HW7=` 指定）。
   // 读不到就退回内置样例，截图脚本不能因为别处文件缺失而失败。
-  const HW7_PATH = process.env.HW7 ?? '<local>/code/dsa/homework/hw7.tex'
+  const HW7_PATH = process.env.HW7 ?? '/home/<user>/homework/hw7.tex'
   let hw7 = ''
   try {
     hw7 = readFileSync(HW7_PATH, 'utf8').split('\n').slice(0, 14).join('\n')

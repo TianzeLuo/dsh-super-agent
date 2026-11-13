@@ -1,6 +1,7 @@
 {
+  "_note": "脱敏格式样例（由本机真实证据改写）：路径、任务 id 均为占位符；完整证据只留在本机 docs/p1*.json（已 gitignore，不入库）。",
   "task": "P1-a: lost 统计口径 + worker 附件传递",
-  "taskId": "tsk_bcdcd2d391",
+  "taskId": "tsk_<task-id>",
   "package": "dsh-super-agent",
   "version": "0.9.0",
   "generatedAt": "2026-11-07T08:29:49-08:00",
@@ -140,7 +141,7 @@
   },
   "rollout": {
     "appliesTo3080": false,
-    "reason": "未复制到 ~/.dsh、未重启、未替换线上插件；改动只在仓库 <local>/project/tools/plugin/dsh-super-agent。线上 3080 仍是旧代码（旧口径与无附件能力），需用户显式安装并重启后才生效。",
+    "reason": "未复制到 ~/.dsh、未重启、未替换线上插件；改动只在仓库 <local>/dsh-super-agent。线上 3080 仍是旧代码（旧口径与无附件能力），需用户显式安装并重启后才生效。",
     "gitCommitted": false
   }
 }

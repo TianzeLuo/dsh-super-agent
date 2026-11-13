@@ -130,10 +130,10 @@ test('中英文词典都补齐了代码块横幅与脚注文案', () => {
 })
 
 /**
- * 真实文件回归：用户报错现场是 `<local>/code/dsa/homework/hw7.tex`（342 行 LaTeX）。
+ * 真实文件回归：用户报错现场是一份 342 行 LaTeX 文件（本机路径不入库，用 `HW7=` 指定）。
  * 文件不在（别人 checkout）就跳过，不让用例变成环境依赖。
  */
-const REAL_TEX = '<local>/code/dsa/homework/hw7.tex'
+const REAL_TEX = process.env.HW7 ?? '/home/<user>/homework/hw7.tex'
 
 test('真实 hw7.tex：走 CodeBlock 路径，宿主读 toolbarLabels 不抛错', (t) => {
   let text

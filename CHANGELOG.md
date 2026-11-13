@@ -9,7 +9,8 @@
   `msg:<messageId>:<partIndex>`，可直接引用当前 Router 会话里粘贴或上传的图片与
   文件；插件通过宿主 attachment service 定位对象，复制到自己的暂存目录，再把绝对
   路径交给 Worker，无需用户先另存文件。绝对/相对路径、限额和既有错误语义不变；失效
-  引用、越界 part、缺失对象均显式报错。详见 `docs/p1d.json`，回归：
+  引用、越界 part、缺失对象均显式报错。脱敏格式样例见 `docs/evidence-sample.json`
+  （完整证据留在本机 `docs/p1*.json`，已 gitignore，不入库），回归：
   `test/attachment-refs.test.mjs`。
 
 ### Changed
@@ -229,11 +230,10 @@
 
 ### Added
 
-- **预览宽度对照 + 真实数据截图**：`preview-column-closed-light.png` /
-  `preview-column-open-light.png`（预览打开后对话区真正缩宽）、
-  `preview-hw7-dark.png`（真实 `<local>/code/dsa/homework/hw7.tex` 正文）。
-- **真实文件回归**：`test/preview-body.test.mjs` 读真实 `hw7.tex`（缺失则跳过），
-  CodeBlock / Markdown 两条路径都断言宿主读取的字段存在。
+- **预览宽度对照**：`preview-column-closed-light.png` /
+  `preview-column-open-light.png`（预览打开后对话区真正缩宽）。
+- **真实文件回归**：`test/preview-body.test.mjs` 可读本机 `.tex`（`HW7=` 指定，
+  缺失则跳过），CodeBlock / Markdown 两条路径都断言宿主读取的字段存在。
 
 ### Changed
 

@@ -2,3 +2,8 @@ node_modules/
 .dsh/
 *.log
 .scratch/
+
+# 本机验证证据与真实数据截图：只留本机，不入库（P2-d 隐私清理）
+docs/p1*.json
+docs/screenshots/p1*.png
+docs/screenshots/preview-hw7-*
