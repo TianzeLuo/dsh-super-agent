@@ -217,6 +217,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
     '/api/super-agent/ui/instances/active',
     '/api/super-agent/ui/instances/rename',
     '/api/super-agent/ui/models',
+    '/api/super-agent/ui/models/default',
     '/api/super-agent/ui/reset',
     '/api/super-agent/ui/schedules',
     '/api/super-agent/ui/schedules/cancel',
@@ -319,7 +320,7 @@ test('an uninitialized project stays inert', async () => {
   assert.equal(agent.tools.size, 0)
   assert.equal(agent.sections.length, 0)
   // UI 入口必须先于 Router 存在；工具/提示词仍然完全不注册。
-  assert.equal(sys.routes.size, 18)
+  assert.equal(sys.routes.size, 19)
 })
 
 test('UI ensure creates a Router through the generic Session API and focus updates it', async () => {
@@ -882,3 +883,77 @@ test('awayNotify 晚于 super-agent 就绪：补登记已经存在的 worker', a
   assert.deepEqual(away.calls, [[rig.workerId, 'super-agent-worker']], '服务就绪时应补登记活着的 worker')
   rig.sys.emit('agent/disposed', { agent: rig.sys.agents.get(rig.router.sessionId) })
 });
+
+test('saving a default model set persists profile-wide and seeds new instances', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-defaults-'))
+  const sys = fakeCordis()
+  sys.scoped.sessionController = {
+    async create({ cwd, sessionId }) {
+      const canonical = sessionId ?? `session-${Math.random().toString(16).slice(2)}`
+      const agent = fakeAgent({ id: canonical, cwd })
+      sys.agents.set(canonical, agent)
+      sys.emit('agent/created', { agent })
+      return { sessionId: canonical }
+    },
+    async resolveAgent(id) {
+      const agent = sys.agents.get(id)
+      return agent === undefined ? { error: { message: 'missing' } } : { agent }
+    },
+    async rename() {},
+  }
+  apply(sys.root, { superAgentHome: home })
+  const ensure = sys.routes.get('/api/super-agent/ui/ensure')
+  const first = await (await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: '{}',
+  }))).json()
+  assert.equal(first.instanceId, 'default')
+
+  const defaults = [
+    { provider: 'qoder', model: 'dfmodel', id: 'qoder/dfmodel', label: 'DeepSeek-V4-Pro', efforts: ['low', 'high'] },
+    { provider: 'qoder', model: 'qfmodel', id: 'qoder/qfmodel', label: 'Qwen3.8-Flash' },
+  ]
+  const response = await sys.routes.get('/api/super-agent/ui/models/default').fetch(new Request('http://127.0.0.1/api/super-agent/ui/models/default', {
+    method: 'POST',
+    body: JSON.stringify({ defaults }),
+  }))
+  const body = await response.json()
+  assert.equal(response.status, 200)
+  assert.equal(body.ok, true)
+  assert.equal(body.mode, 'defaults')
+  assert.equal(body.defaults.length, 2)
+  assert.equal(body.models.length, 2)
+
+  const profile = JSON.parse(readFileSync(join(home, '.dsh', 'super-agent.json'), 'utf8'))
+  assert.deepEqual(profile.models.defaults, defaults)
+  assert.equal(profile.models.allowed, undefined, 'saving defaults must not write an allowlist')
+
+  const created = await (await sys.routes.get('/api/super-agent/ui/instances').fetch(new Request('http://127.0.0.1/api/super-agent/ui/instances', {
+    method: 'POST',
+    body: JSON.stringify({ name: '写作' }),
+  }))).json()
+  assert.equal(created.ok, true)
+  const instanceConfig = JSON.parse(readFileSync(join(created.instance.home, '.dsh', 'super-agent.json'), 'utf8'))
+  assert.deepEqual(instanceConfig.models.defaults, defaults)
+  assert.equal(instanceConfig.models.allowed, undefined)
+
+  const second = await (await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
+    method: 'POST',
+    body: JSON.stringify({ instance_id: created.instance.id }),
+  }))).json()
+  assert.equal(second.instanceId, created.instance.id)
+  const models = await (await sys.routes.get('/api/super-agent/ui/models').fetch(new Request('http://127.0.0.1/api/super-agent/ui/models'))).json()
+  assert.equal(models.mode, 'defaults')
+  assert.equal(models.defaults.length, 2)
+  assert.equal(models.models.length, 2)
+
+  const invalid = await sys.routes.get('/api/super-agent/ui/models/default').fetch(new Request('http://127.0.0.1/api/super-agent/ui/models/default', {
+    method: 'POST',
+    body: JSON.stringify({ defaults: [{ provider: 'qoder' }] }),
+  }))
+  assert.equal(invalid.status, 400)
+  assert.equal((await invalid.json()).ok, false)
+
+  sys.emit('agent/disposed', { agent: sys.agents.get(first.sessionId) })
+  sys.emit('agent/disposed', { agent: sys.agents.get(second.sessionId) })
+})

@@ -204,3 +204,63 @@ test('name filter falls back to the matching default and warns when nothing matc
   assert.equal(empty.defaultId, undefined)
   assert.ok(empty.warnings.some((warning) => warning.includes('没有匹配')))
 })
+
+test('saved default set becomes the callable set instead of all catalog models', () => {
+  const view = normalizeModelConfig({
+    models: {
+      allowed: [],
+      defaults: [
+        { provider: 'qoder', model: 'dfmodel', id: 'pro', label: 'Pro' },
+        { provider: 'qoder', model: 'qfmodel' },
+      ],
+    },
+  }, { catalog })
+  assert.equal(view.mode, 'defaults')
+  assert.deepEqual(view.models.map((entry) => entry.model), ['dfmodel', 'qfmodel'])
+  assert.equal(view.models.length, 2, 'must not fall back to all 3 catalog models')
+  assert.equal(view.defaultId, 'pro')
+  assert.ok(view.models.every((entry) => entry.configured === false))
+  const payload = modelViewPayload(view)
+  assert.equal(payload.mode, 'defaults')
+  assert.equal(payload.defaults.length, 2)
+})
+
+test('default set silently skips models missing from the catalog or source filter', () => {
+  const view = normalizeModelConfig({
+    models: {
+      allowed: [],
+      defaults: [
+        { provider: 'qoder', model: 'dfmodel' },
+        { provider: 'qoder', model: 'removed-model' },
+        { provider: 'deepseek', model: 'deepseek-v4-pro' },
+      ],
+      onlyProvider: 'qoder',
+    },
+  }, { catalog })
+  assert.equal(view.mode, 'defaults')
+  assert.deepEqual(view.models.map((entry) => entry.model), ['dfmodel'])
+  assert.equal(view.warnings.length, 0, 'a removed default entry must not surface an error')
+  assert.equal(view.defaults.length, 3, 'the saved set is kept even when some entries are unavailable')
+})
+
+test('a default set whose entries all vanished stays empty instead of selecting everything', () => {
+  const view = normalizeModelConfig({
+    models: { allowed: [], defaults: [{ provider: 'qoder', model: 'removed-model' }] },
+  }, { catalog })
+  assert.equal(view.mode, 'defaults')
+  assert.equal(view.models.length, 0)
+  assert.equal(view.defaultId, undefined)
+  assert.equal(view.warnings.length, 0)
+})
+
+test('an explicit allowlist still wins over the saved default set', () => {
+  const view = normalizeModelConfig({
+    models: {
+      allowed: [{ provider: 'deepseek', model: 'deepseek-v4-pro' }],
+      defaults: [{ provider: 'qoder', model: 'dfmodel' }],
+    },
+  }, { catalog })
+  assert.equal(view.mode, 'allowlist')
+  assert.deepEqual(view.models.map((entry) => entry.model), ['deepseek-v4-pro'])
+  assert.equal(view.defaults.length, 1)
+})
