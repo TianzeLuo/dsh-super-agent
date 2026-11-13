@@ -41,6 +41,7 @@ test('dispatch records the chosen model and passes agentOptions to the subagent'
   assert.equal(result.modelLabel, 'Flash')
   assert.equal(result.reasoningEffort, 'low')
   const spec = ctx.subagents.spawns[0].spec
+  assert.deepEqual(spec.agentOptions, { provider: 'qoder', model: 'qfmodel', reasoningEffort: 'low' })
   assert.deepEqual(spec.request.agentOptions, { provider: 'qoder', model: 'qfmodel', reasoningEffort: 'low' })
   const task = ctx.runtime.taskDetail(result.taskId)
   assert.equal(task.model, 'flash')
@@ -55,6 +56,7 @@ test('dispatch defaults to the configured allowlist default and rejects disallow
   const result = await ctx.runtime.dispatch({ title: 'Default model', brief: 'Go.' })
   assert.equal(result.model, 'pro')
   assert.equal(result.reasoningEffort, 'high')
+  assert.deepEqual(ctx.subagents.spawns[0].spec.agentOptions, { provider: 'qoder', model: 'dfmodel', reasoningEffort: 'high' })
   assert.deepEqual(ctx.subagents.spawns[0].spec.request.agentOptions, { provider: 'qoder', model: 'dfmodel', reasoningEffort: 'high' })
   assert.throws(
     () => ctx.runtime.dispatch({ title: 'Bad effort', brief: 'Go.', model: 'flash', reasoningEffort: 'max' }),

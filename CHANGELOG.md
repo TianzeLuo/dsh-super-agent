@@ -43,6 +43,15 @@
 
 ### Fixed
 
+- **DSH 0.2.2 上派工必然失败（#2）**：宿主把 `subagents.startActivation` 的 spec 从
+  「任务字段放在 `spec.request` 里」改成扁平结构，并在创建 child 之前直接读
+  `spec.parent.id`；`#spawnTask` 仍只传旧形状，于是每个任务都落 `failed` 且没有
+  Worker 会话（`Cannot read properties of undefined (reading 'id')`）。修复：同一份
+  任务字段既平铺在顶层，也保留 `request` 别名，0.2.1 只读 `request`、0.2.2 只读顶层
+  都能启动，两代宿主共用一份代码。回归：`test/runtime.test.mjs`（0.2.2 扁平 spec、
+  0.2.1 request 形状各一条）与 `test/features.test.mjs`（`agentOptions` 两种位置）；
+  `test/fake-host.mjs` 的假宿主按 0.2.2 的访问顺序读 `spec.parent.id`，形状回退会直接
+  复现同一个 TypeError。
 - **Worker 刚启动就丢（P1-c）**：根因是 watchdog 在任务仍为 `starting` 时按
   “`workerSessionId` 查不到 live agent”直接判 lost；跨项目路径还会在宿主创建
   Session 前预写一个假的 session id。并发 spawn 时宿主建会话需要数秒，任何一次

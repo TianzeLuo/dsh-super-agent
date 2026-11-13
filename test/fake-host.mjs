@@ -143,7 +143,34 @@ export function fakeChild(id, options = {}) {
   return child
 }
 
-/** 假 subagents 服务。 */
+/** 登记一条假 activation，供两种宿主形状共用。 */
+function fakeActivation(children, spawns, spec, childId, parentId) {
+  const child = fakeChild(childId)
+  children.set(child.id, child)
+  const result = Promise.withResolvers()
+  const activation = {
+    childId: child.id,
+    messageId: 'msg-1',
+    result: result.promise,
+    disposed: false,
+    parentId,
+    async dispose() {
+      activation.disposed = true
+      children.delete(child.id)
+      child.dispose()
+      result.resolve({ stopOutput: [], stopReason: 'completed' })
+    },
+    spec,
+  }
+  spawns.push(activation)
+  return Promise.resolve(activation)
+}
+
+/**
+ * 假 subagents 服务（DSH 0.2.2 形状）：`startActivation` 在创建 child 之前直接读
+ * `spec.parent.id`，任务字段只读顶层。旧 request 形状在这里会抛和宿主一样的
+ * `TypeError: Cannot read properties of undefined (reading 'id')`。
+ */
 export function fakeSubagents(children) {
   const spawns = []
   return {
@@ -152,24 +179,29 @@ export function fakeSubagents(children) {
       return name === 'spawn' ? { name, capabilities: {} } : undefined
     },
     startActivation(spec) {
-      const child = fakeChild(spec.childId)
-      children.set(child.id, child)
-      const result = Promise.withResolvers()
-      const activation = {
-        childId: child.id,
-        messageId: 'msg-1',
-        result: result.promise,
-        disposed: false,
-        async dispose() {
-          activation.disposed = true
-          children.delete(child.id)
-          child.dispose()
-          result.resolve({ stopOutput: [], stopReason: 'completed' })
-        },
-        spec,
-      }
-      spawns.push(activation)
-      return Promise.resolve(activation)
+      const parentId = spec.parent.id
+      if (!Array.isArray(spec.prompt)) throw new TypeError('spec.prompt must be a ContentBlock[]')
+      return fakeActivation(children, spawns, spec, spec.childId, parentId)
+    },
+  }
+}
+
+/**
+ * 假 subagents 服务（DSH 0.2.1 形状）：只读 `spec.request.*`，顶层任务字段一律忽略。
+ * 新宿主里它读不到 parent 会抛同样的 TypeError，所以两种形状都真的有断言。
+ */
+export function fakeLegacySubagents(children) {
+  const spawns = []
+  return {
+    spawns,
+    getProvider(name) {
+      return name === 'spawn' ? { name, capabilities: {} } : undefined
+    },
+    startActivation(spec) {
+      const request = spec.request
+      const parentId = request.parent.id
+      if (!Array.isArray(request.prompt)) throw new TypeError('spec.request.prompt must be a ContentBlock[]')
+      return fakeActivation(children, spawns, spec, spec.childId, parentId)
     },
   }
 }

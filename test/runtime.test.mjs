@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { threadId } from '../lib/ids.js'
 import { Store } from '../lib/store.js'
 import { RuntimeInputError } from '../lib/runtime.js'
-import { fakeChild, fakeProject, fakeRouter, setupRuntime, tick } from './fake-host.mjs'
+import { fakeChild, fakeLegacySubagents, fakeProject, fakeRouter, setupRuntime, tick } from './fake-host.mjs'
 
 /** 从批次消息里取纯文本。 */
 function messageText(message) {
@@ -90,6 +90,40 @@ test('dispatch starts an isolated worker and returns immediately', async () => {
   assert.match(spawn.spec.request.prompt[0].text, /Fix login/)
   assert.match(spawn.spec.request.prompt[0].text, /Reproduce the Safari bug/)
   assert.equal(ctx.router.messages.length, 0)
+  ctx.runtime.stop()
+})
+
+test('a 0.2.2 flat activation spec starts a worker', async () => {
+  const ctx = setupRuntime()
+  const dispatched = ctx.runtime.dispatch({ title: 'Flat spec', brief: 'Work', threadIds: [threadId('im', 'team:flat')] })
+  await tick()
+  assert.equal(ctx.store.getTask(dispatched.taskId).status, 'working')
+  const activation = ctx.subagents.spawns[0]
+  const { spec } = activation
+  // 新宿主读顶层：parent 是这条 Router，prompt/cwd 不再包在 request 里。
+  assert.equal(spec.parent, ctx.router)
+  assert.equal(activation.parentId, ctx.router.id)
+  assert.equal(spec.cwd, ctx.root)
+  assert.match(spec.prompt[0].text, /Flat spec/)
+  assert.equal(spec.childId, ctx.store.getTask(dispatched.taskId).workerSessionId)
+  // 旧宿主别名仍在，且和顶层是同一份字段，不是两份任务。
+  assert.equal(spec.request.parent, ctx.router)
+  assert.equal(spec.request.cwd, ctx.root)
+  assert.equal(spec.request.prompt, spec.prompt)
+  ctx.runtime.stop()
+})
+
+test('a 0.2.1 request-shaped activation spec still starts a worker', async () => {
+  const project = fakeProject()
+  const children = new Map()
+  const subagents = fakeLegacySubagents(children)
+  const ctx = setupRuntime({ project, children, subagents })
+  const dispatched = ctx.runtime.dispatch({ title: 'Legacy spec', brief: 'Work' })
+  await tick()
+  const task = ctx.store.getTask(dispatched.taskId)
+  assert.equal(task.status, 'working')
+  assert.equal(task.workerSessionId, subagents.spawns[0].childId)
+  assert.equal(subagents.spawns[0].parentId, ctx.router.id)
   ctx.runtime.stop()
 })
 
