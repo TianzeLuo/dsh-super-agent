@@ -92,3 +92,77 @@ test('editing an existing group fact uses a distinct React identity and cancel l
   assert.equal(nodes(tree, (row) => row.type === api.MemoryEditor).length, 0)
   assert.equal(nodes(tree, (row) => row.type === 'article').length, 1)
 })
+
+test('collaboration help is adjacent to the title, closes before the drawer on Escape and leads to setup', () => {
+  const { api, render } = harness()
+  let setups = 0
+  let closed = 0
+  const props = { t, onSetup: () => setups++, onClose: () => closed++ }
+  let tree = render(api.CollaborationHeader, props)
+  const help = nodes(tree, (row) => row.type === 'button' && row.children.includes('collabHowTo'))[0]
+  assert.equal(help.props['aria-expanded'], false)
+  assert.equal(nodes(tree, (row) => row.props.role === 'region').length, 0)
+  help.props.onClick()
+  tree = render(api.CollaborationHeader, props)
+  const region = nodes(tree, (row) => row.props.role === 'region')[0]
+  const trigger = nodes(tree, (row) => row.type === 'button' && row.children.includes('collabHowTo'))[0]
+  assert.equal(trigger.props['aria-controls'], region.props.id)
+  assert.equal(region.props['data-super-agent-popup'], '')
+  let prevented = 0
+  region.props.onKeyDown({ key: 'Escape', preventDefault: () => prevented++, stopPropagation: () => prevented++ })
+  tree = render(api.CollaborationHeader, props)
+  assert.equal(prevented, 2)
+  assert.equal(closed, 0)
+  assert.equal(nodes(tree, (row) => row.props.role === 'region').length, 0)
+  nodes(tree, (row) => row.type === 'button' && row.children.includes('collabHowTo'))[0].props.onClick()
+  tree = render(api.CollaborationHeader, props)
+  nodes(tree, (row) => row.type === api.CollaborationHelp)[0].props.onSetup()
+  tree = render(api.CollaborationHeader, props)
+  assert.equal(setups, 1)
+  assert.equal(nodes(tree, (row) => row.props.role === 'region').length, 0)
+})
+
+test('first-time setup shows opt-in roles before a disabled primary selector and never chooses a primary automatically', () => {
+  const { api, render } = harness()
+  const actions = []
+  const props = { t, topics: [{ id: 'a', name: 'Research' }, { id: 'hidden', name: 'Hidden', archived: true }], profiles: {}, collaborators: [], settings: { primaryTopicId: null, paused: false }, onAction: (body) => actions.push(body) }
+  let tree = render(api.CollaborationSettings, props)
+  const sections = nodes(tree, (row) => row.type === 'section')
+  assert.deepEqual(sections.map((row) => row.props['aria-label']), ['collabEnableStep', 'collabPrimaryStep'])
+  assert.equal(nodes(tree, (row) => row.type === api.CollaborationRole).length, 1)
+  let select = nodes(tree, (row) => row.type === api.SelectMenu)[0]
+  assert.equal(select.props.disabled, true)
+  assert.equal(select.props.options[0].label, 'collabPrimaryLockedOption')
+  assert.ok(nodes(tree, (row) => row.children.includes('collabPrimaryLocked')).length)
+  props.collaborators = [{ id: 'a', name: 'Research' }]
+  props.profiles = { a: { enabled: true } }
+  tree = render(api.CollaborationSettings, props)
+  select = nodes(tree, (row) => row.type === api.SelectMenu)[0]
+  assert.equal(select.props.disabled, false)
+  assert.equal(select.props.value, '')
+  assert.equal(actions.length, 0)
+  select.props.onChange('a')
+  assert.deepEqual(actions[0], { action: 'configure', primary_topic_id: 'a' })
+})
+
+test('the prominent opt-in switch preserves an unsaved role and keeps busy controls disabled', async () => {
+  const { api, render } = harness()
+  const calls = []
+  const props = { t, topic: { id: 'a', name: 'Research' }, profile: { enabled: false, role: '' }, onSave: async (body) => { calls.push(body); return false } }
+  let tree = render(api.CollaborationRole, props)
+  nodes(tree, (row) => row.type === 'textarea')[0].props.onChange({ target: { value: 'Keep sources and constraints.' } })
+  tree = render(api.CollaborationRole, props)
+  const toggle = nodes(tree, (row) => row.props.role === 'switch')[0]
+  assert.equal(toggle.props['aria-checked'], false)
+  assert.ok(toggle.children.includes('collabEnableAction'))
+  await toggle.props.onClick()
+  assert.deepEqual(calls[0], { topic_id: 'a', enabled: true })
+  props.profile = { enabled: true, role: '' }
+  props.busy = true
+  tree = render(api.CollaborationRole, props)
+  const enabled = nodes(tree, (row) => row.props.role === 'switch')[0]
+  assert.equal(enabled.props['aria-checked'], true)
+  assert.equal(enabled.props.disabled, true)
+  assert.ok(enabled.children.includes('collabEnabled'))
+  assert.equal(nodes(tree, (row) => row.type === 'textarea')[0].props.value, 'Keep sources and constraints.')
+})
