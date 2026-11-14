@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Super-agent",
+    "description": "Runs a two-layer Router/Worker setup inside one window: the Router judges and dispatches, Workers execute in separate sessions, and a panel reuses the official conversation UI for task status, steering and approvals. Single machine and single process; Worker sessions do not survive a host restart.",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -10,6 +10,8 @@
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./protocol": "./lib/protocol.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "engines": {
@@ -19,9 +21,14 @@
   "files": [
     "lib",
     "bin",
-    "docs",
+    "docs/*.md",
+    "docs/images",
+    "docs/preview.svg",
     "cordis.patch.yml",
-    "README.md"
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node --test"

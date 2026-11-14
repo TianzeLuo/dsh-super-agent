@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "超级代理",
+    "description": "在一个窗口里跑两层代理：Router 负责判断与分派，Worker 在独立会话里执行，面板复用官方会话界面查看任务、补指令与处理审批。单机单进程；宿主重启后 Worker 会话不会自动恢复。",
+    "detail": "docs/DETAIL.zh.md"
+  }
+}
