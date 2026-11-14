@@ -64,7 +64,7 @@ export function loadClientBundle(modules = {}, env = {}) {
   run(
     windowStub,
     locationStub,
-    { querySelectorAll: () => [], body: {} },
+    env.document ?? { querySelectorAll: () => [], body: {} },
     class { observe() {} disconnect() {} },
     () => 0,
     () => {},
