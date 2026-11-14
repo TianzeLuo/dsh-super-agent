@@ -426,6 +426,8 @@ export function setupRuntime(options = {}) {
     topics: options.topics,
     resolveTopic: options.resolveTopic,
     readTopicMessages: options.readTopicMessages,
+    resolveCollaboration: options.resolveCollaboration,
+    readCollaborationMessages: options.readCollaborationMessages,
     projects,
     models,
     schedule: scheduleBridge,

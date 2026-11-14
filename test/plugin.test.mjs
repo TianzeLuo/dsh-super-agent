@@ -123,6 +123,9 @@ function fakeAgent({ id, cwd, subagent = false }) {
     emit(event, ...args) {
       for (const handler of [...(handlers.get(event) ?? [])]) handler(...args)
     },
+    results(event, ...args) {
+      return [...(handlers.get(event) ?? [])].map((handler) => handler(...args))
+    },
     count(event) {
       return handlers.get(event)?.size ?? 0
     },
@@ -212,6 +215,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
     '/api/super-agent/status',
     '/api/super-agent/ui/activity',
     '/api/super-agent/ui/agreements',
+    '/api/super-agent/ui/collaboration',
     '/api/super-agent/ui/ensure',
     '/api/super-agent/ui/focus',
     '/api/super-agent/ui/instances',
@@ -314,7 +318,7 @@ test('topics keep native histories but share one owner; concurrent ensures and i
   assert.equal(rig.created(), 3)
   assert.equal(new Set([main.dataDir, first.dataDir, second.dataDir]).size, 1)
   const topicAgent = rig.sys.agents.get(first.sessionId)
-  assert.equal(topicAgent.tools.size, 14)
+  assert.equal(topicAgent.tools.size, 16)
   assert.match(topicAgent.sections.map((row) => row.text).join('\n'), /### Durable facts and topic progress/)
   await topicAgent.tools.get('superagent_memory').execute({ action: 'remember', text: 'LOCAL-ONLY fixture' }, {})
   await rig.request('topics', { action: 'shared_notes', instance_id: 'default', notes: 'COMMON fixture' })
@@ -394,7 +398,7 @@ test('history sharing is explicit and read-only; restart and timer-first resume 
   await rig.close()
   const resumed = await topicRig(rig.home, rig.persisted)
   const coldTopic = await resumed.activate(source.sessionId)
-  assert.equal(coldTopic.tools.size, 14, 'cold topic lifecycle waits for the owning runtime before accepting a timer prompt')
+  assert.equal(coldTopic.tools.size, 16, 'cold topic lifecycle waits for the owning runtime before accepting a timer prompt')
   assert.ok(resumed.sys.agents.has(main.sessionId), 'overview restored as owner')
   assert.equal(resumed.created(), 0, 'existing native histories are restored, never replaced')
   const state = await resumed.request('state', undefined, { instance_id: 'default', topic_id: a.id })
@@ -402,6 +406,47 @@ test('history sharing is explicit and read-only; restart and timer-first resume 
   assert.equal(state.topics.find((row) => row.id === a.id).notes, 'PERSISTED fixture')
   assert.equal(state.topics.find((row) => row.id === a.id).sharing, 'history')
   await resumed.close()
+})
+
+test('collaboration sessions share the owner, retain pointers, guard native waits and keep group results out of private summaries', async () => {
+  const rig = await topicRig()
+  const main = await rig.request('ensure', { instance_id: 'default' })
+  const a = (await rig.request('topics', { action: 'create', name: 'Group researcher fixture' })).topic
+  const b = (await rig.request('topics', { action: 'create', name: 'Group reviewer fixture' })).topic
+  for (const topic of [a, b]) await rig.request('collaboration', { action: 'configure', topic_id: topic.id, enabled: true, role: 'Handle approved group material.' })
+  await rig.request('collaboration', { action: 'configure', primary_topic_id: a.id })
+  const group = (await rig.request('collaboration', { action: 'create_group', name: 'Host group fixture', members: [a.id, b.id] })).group
+  await rig.request('collaboration', { action: 'memory', group_id: group.id, memory_action: 'save', key: 'deadline', text: 'Wednesday only.', priority: 'important' })
+  const post = await rig.request('collaboration', { action: 'post', message: 'Use this group-only fixture.', idempotency_key: 'host-post' }, { group_id: group.id })
+  assert.equal(post.group.id, group.id, 'POST retains the selected group from the query')
+  const deadline = Date.now() + 2000
+  let managed
+  while (Date.now() < deadline && !managed) {
+    managed = [...rig.sys.agents.values()].find((agent) => agent.id !== main.sessionId && agent.tools.size === 16)
+    if (!managed) await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.ok(managed, 'the native collaboration session is opened lazily')
+  const guardResult = managed.ctx.results('tools/pre-execute', { name: 'wait_agent' }, () => undefined)
+  assert.ok(guardResult.some((row) => row?.kind === 'deny' && /automatically wake/.test(row.reason)))
+  const view = await rig.request('state')
+  assert.ok(view.workspaceSessions.includes(managed.id))
+  assert.equal(view.routers.some((row) => row.sessionId === managed.id), false, 'internal sessions are never notification navigation targets')
+  const journal = readFileSync(join(main.dataDir, 'journal.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
+  assert.equal(journal.findLast((row) => row.t === 'collaboration.context').value.sessionId, managed.id)
+  managed.status = 'idle'
+  await rig.sys.emit('session/event', managed.session, { type: 'assistant/message', data: { message: { id: 'group-answer', role: 'assistant', content: [{ type: 'text', text: 'GROUP-RESPONSE-CANARY' }] } } })
+  await rig.sys.emit('session/event', managed.session, { type: 'turn/end', data: { turn: 1 } })
+  const conversation = await rig.request('collaboration', undefined, { group_id: group.id })
+  assert.ok(conversation.messages.some((row) => row.body === 'GROUP-RESPONSE-CANARY'))
+  const topics = await rig.request('topics')
+  assert.ok(topics.topics.every((topic) => !JSON.stringify(topic).includes('GROUP-RESPONSE-CANARY')))
+  await rig.request('reset', { instance_id: 'default', topic_id: 'main' })
+  const retained = await rig.request('collaboration', undefined, { group_id: group.id })
+  assert.equal(retained.settings.primaryTopicId, a.id)
+  assert.match(retained.group.memory[0].text, /Wednesday/)
+  assert.ok(retained.messages.some((row) => row.body === 'GROUP-RESPONSE-CANARY'))
+  assert.equal(retained.requests.length, 0, 'reset preserves group memory/history but ends operational work')
+  await rig.close()
 })
 
 test('HTTP ingest and outbox routes operate on the runtime', async () => {
@@ -468,7 +513,7 @@ test('an uninitialized project stays inert', async () => {
   assert.equal(agent.tools.size, 0)
   assert.equal(agent.sections.length, 0)
   // UI 入口必须先于 Router 存在；工具/提示词仍然完全不注册。
-  assert.equal(sys.routes.size, 21)
+  assert.equal(sys.routes.size, 22)
 })
 
 test('UI ensure creates a Router through the generic Session API and focus updates it', async () => {
@@ -598,7 +643,7 @@ test('UI ensure without cwd uses an independent Super-agent workspace', async ()
   assert.ok(existsSync(join(home, '.dsh', 'super-agent.json')))
   assert.deepEqual(created.map((workspace) => [workspace.title, workspace.path]), [['Super-agent Workspace', home]])
   assert.deepEqual(attached, [body.sessionId])
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 14)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 16)
   const projectTool = await sys.agents.get(body.sessionId).tools.get('superagent_projects').execute({}, {})
   assert.deepEqual(projectTool.projects.map((project) => project.title), ['alpha'])
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
@@ -807,7 +852,7 @@ test('the dedicated Router takes precedence over an older project Router', async
   assert.equal(response.status, 200)
   assert.equal(body.projectRoot, home)
   assert.notEqual(body.sessionId, old.id)
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 14)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 16)
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
   )
@@ -877,7 +922,7 @@ test('UI reset starts a fresh dataDir generation and archives active workers', a
   assert.match(body.dataDir, /super-agent-resets[\\/]gen-/)
   assert.ok(archived.every((sessionId) => sessionId !== oldSession))
   assert.ok(archived.includes(activeWorker))
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 14)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 16)
   const state = await (await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
   )).json()

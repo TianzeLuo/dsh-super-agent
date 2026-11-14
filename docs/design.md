@@ -33,12 +33,13 @@
 | 浏览器半部 | `lib/client.js` | 左栏入口、main 面板、自动准备 Router、嵌入式官方会话、右侧活动栏与任务详情、模型/规则/定时任务抽屉、官方渲染的多标签文件预览列（打开时让出活动栏）、通知点击的实例/会话定位与 `?navdebug=1` 导航诊断、二次确认重置、Worker/旧 Router 展示层隐藏；无项目选择器 | 不定义消息协议，不选项目 |
 | Runtime | `lib/runtime.js` | 批处理、直通、Worker 生命周期、报告、Watchdog、恢复、inbox | 不调模型 |
 | Store | `lib/store.js` | journal 追加、重放、内存索引 | 不做策略 |
+| Collaboration | `lib/collaboration.js` | 协作角色、请求所有权、定向投递、群与有界上下文，复用 Store 和 Worker 池 | 不创建第二个运行时或权限沙箱 |
 | Filter | `lib/filter.js` | 程序层快路径 | 不调模型 |
 | Render | `lib/render.js` | 批次/Worker 提示/状态文本 | 不读外部状态 |
 | Recall | `lib/recall.js` | 链式召回 | 不写状态 |
 | Config | `lib/config.js` | 默认值、合并、路径边界 | 不读会话 |
 | Prompt | `lib/prompt.js` | Router 提示词/动态上下文 | 不执行工具 |
-| Tools | `lib/tools.js` | 十个模型工具（状态/召回/项目/派工/模型/定时/约定/指令/汇报/关闭） | 不直接改 journal |
+| Tools | `lib/tools.js` | 模型工具（状态/召回/派工/记忆/协作等） | 不直接改 journal |
 | Models | `lib/models.js` | 目录展开、allowlist/来源过滤、默认选择、effort 校验 | 不调模型 |
 | Agreements | `lib/agreements.js` | 长期约定的持久化、作用域合并、提示词注入 | 不执行工具 |
 | Schedule bridge | `lib/schedule-bridge.js` | 把宿主 `ctx.schedule` 暴露成工具和 UI；兼容 0.2.1 按会话与 0.2.2 宿主级两代契约 | 不自己计时 |
@@ -51,8 +52,9 @@
 
 1. **单写者**：一个 `journal.jsonl` 在一个宿主进程内只有一个 `Store` 实例写；
    跨进程由 `owner.json` 的 pid 租约阻止第二个写者。
-2. **单 Router**：一个 `dataDir` 在进程内只允许一个 root agent 认领；后开的根会话
-   不安装工具。
+2. **单 Router 运行时**：一个 `dataDir` 只有一个 root agent 认领调度与 journal。主题和
+   协作 Session 使用这个运行时绑定的工具；没有已登记身份的其他根会话不安装工具。
+   主分身是可选协调角色，不是新的租约持有者或第二个调度器，见[分身协作](collaboration.md)。
 3. **Worker 不安装 Router 工具**：`header.origin === 'subagent'` 或
    `delegationDepth > 0` 直接跳过；UI/跨项目任务创建的普通 Session 由进程内
    `reservedWorkerSessions` 集合跳过（即使目标项目碰巧开着插件）。

@@ -1,8 +1,8 @@
 {
   "name": "dsh-super-agent",
-  "version": "0.12.2",
+  "version": "0.13.0",
   "private": true,
-  "description": "DSH plugin: Router/Worker super-agent with independent topic histories, bounded sharing, a shared task pool, durable triggers, schedules, and channel outbox.",
+  "description": "DSH plugin: independent agent chats, primary coordination, durable task handoffs and scoped group collaboration on one Router/Worker runtime.",
   "type": "module",
   "license": "MIT",
   "main": "./lib/index.js",

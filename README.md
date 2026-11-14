@@ -43,6 +43,7 @@ dsh plugin --profile web add github:TianzeLuo/dsh-super-agent
 
 - **两层代理**：Router 判断、Worker 执行，长任务不阻塞对话；面板复用官方会话，消息、审批和平时一致。
 - **多个对话分身**：按研究、写作、日常等方向分开聊天与记忆，共用任务资源；按需分享摘要或查阅聊天。
+- **分身协作**：按需开启角色与主分身，交办、交接任务或建立小组群聊；协作上下文单独保存，结果返回原处。
 - **可更新的记忆**：修订同一事实、归档过时信息；完整条目按重点与相关性注入，预算不足时明确提示并按需读取。
 - **插队 steer**：给在线 Worker 补一句话，默认在它的下一个模型步生效，不必等整轮跑完。
 - **会话附件引用**：当前 Router 会话里粘贴或上传的图片、文件可直接交给 Worker，不用先另存。
@@ -57,6 +58,7 @@ dsh plugin --profile web add github:TianzeLuo/dsh-super-agent
 | 直接说话派活 | Router 对话 | Router 自行决定开 Worker 还是直接回答 |
 | **对话分身 · 当前名称** | 顶栏 | 展开或收起分身切换栏；收起后仍能看清当前在和哪个分身聊天 |
 | **新建分身 / 管理与记忆** | 展开后的分身栏 | 创建并切换独立对话，管理共享、协作摘要、记忆和 AI 参考内容 |
+| **分身协作** | 顶栏 | 开启协作角色，选择主分身，交办任务、查看负责人和群聊 |
 | **任务范围** | 近期活动 | 切换本分身任务或全部任务，并查看任务来自哪个分身 |
 | 项目开关 | 项目根 `.dsh/super-agent.json` | 写入 `{"version":1,"enabled":true}` 才启用；没有文件默认关闭 |
 | 任务徽标 / 报告 | 面板 | 查看状态、补指令（steer）、处理审批 |
@@ -66,6 +68,7 @@ dsh plugin --profile web add github:TianzeLuo/dsh-super-agent
 配置项、工具参数与 HTTP 接口见 [使用与配置](docs/usage.md)；记忆取舍与测试结果见
 [记忆设计](docs/memory-design.md)和[场景验证](docs/memory-evaluation.md)。
 界面编排与常见操作见[交互设计](docs/ui-design.md)。
+主从协调、交接、群聊和权限边界见[分身协作](docs/collaboration.md)。
 
 ## 已知限制
 
