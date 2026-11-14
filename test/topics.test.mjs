@@ -36,10 +36,12 @@ test('sharing never publishes a private title, notes or arbitrary session id', (
   const { registry, a, b } = setup()
   registry.update(b.id, { name: 'PRIVATE-IDENTITY', notes: 'PRIVATE-NOTE' })
   registry.reply(b.id, 'PRIVATE-REPLY', 'private-message')
+  registry.updateState(b.id, { result: 'PRIVATE-STATE' }, 0)
   assert.doesNotMatch(JSON.stringify(registry.visible(a.id)), /PRIVATE|session-development/)
   assert.doesNotMatch(registry.context(a.id), /PRIVATE/)
   registry.update(b.id, { sharing: 'summary' })
-  assert.match(registry.context(a.id), /PRIVATE-REPLY/)
+  assert.match(registry.context(a.id), /PRIVATE-STATE/)
+  assert.doesNotMatch(registry.context(a.id), /PRIVATE-REPLY/, 'reply prefixes are no longer injected as progress')
   assert.doesNotMatch(registry.context(a.id), /PRIVATE-NOTE|session-development/)
 })
 
@@ -51,7 +53,7 @@ test('notes remain local unless instance scope is explicit, and overflow preserv
   assert.doesNotMatch(registry.context(b.id), /ONLY-WRITING/)
   assert.match(registry.context(b.id), /COMMON-DECISION/)
   assert.equal(registry.get(a.id).notes, 'ONLY-WRITING')
-  assert.throws(() => registry.remember(a.id, 'x'.repeat(4000)), /combined notes/)
+  assert.throws(() => registry.remember(a.id, 'x'.repeat(4000)), /memory text/)
   assert.equal(registry.get(a.id).notes, 'ONLY-WRITING')
   registry.remember(a.id, 'api_key=abcdefghijklmnop')
   assert.doesNotMatch(registry.get(a.id).notes, /abcdefghijklmnop/)
@@ -93,15 +95,15 @@ test('status injection has a bounded number of other topics even with long multi
   const { registry, a } = setup()
   for (let index = 0; index < 20; index++) {
     const row = registry.create(`${index} ${'主题'.repeat(20)}`)
-    registry.reply(row.id, '进展'.repeat(200), `message-${index}`)
+    registry.updateState(row.id, { result: '进展'.repeat(100) }, 0)
   }
-  const context = registry.context(a.id)
-  const count = (context.match(/recent reply excerpt:/g) ?? []).length
+  const plan = registry.contextPlan(a.id, { maxChars: 3500 })
+  const context = plan.text
+  const count = plan.selected.filter((row) => row.kind === 'state').length
   assert.ok(count > 0 && count <= TOPIC_LIMITS.contextItems)
-  assert.match(context, new RegExp(`${registry.visible(a.id).length - 1 - count} other topic\\(s\\) omitted`))
-  const status = context.split('<<<other topic status')[1]
-  assert.ok(status.length < TOPIC_LIMITS.context + 150)
-  assert.match(context, /omitted/)
+  assert.ok(context.length <= 3500)
+  assert.ok(plan.omitted.length > 0)
+  assert.match(context, /Omitted/)
 })
 
 test('summary recall does not read a transcript; denied history cannot touch the host', async () => {

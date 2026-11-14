@@ -209,3 +209,41 @@ test('topic objectives keep their own schedules and are excluded from other topi
   assert.equal(ctx.schedule.records.size, 0)
   ctx.runtime.stop()
 })
+
+test('memory writes capture the caller message source and state writes cannot redirect to another topic', async () => {
+  const ctx = setup()
+  ctx.first.session.deriveMessages = () => [{ id: 'fixture-user-source', role: 'user', content: [{ type: 'text', text: 'Remember this current fact.' }] }]
+  const result = await ctx.aTools.get('superagent_memory').execute({ action: 'save', key: 'current-fact', text: 'Current value with its qualification.', scope: 'instance' })
+  assert.equal(result.entry.source.messageId, 'fixture-user-source')
+  assert.equal(result.entry.source.topicId, ctx.a.id)
+  await ctx.aTools.get('superagent_memory').execute({ action: 'state', topic_id: ctx.b.id, expected_revision: 0, state: { result: 'Prepared, but verification remains pending.' } })
+  assert.match(ctx.topics.get(ctx.a.id).state.result, /verification remains pending/)
+  assert.equal(ctx.topics.get(ctx.b.id).stateRevision, 0)
+  ctx.runtime.stop()
+})
+
+test('workers use the same bounded selection, retain late critical conditions and exclude another topic local facts', async () => {
+  const ctx = setup()
+  ctx.runtime.config.context = { maxChars: 2600 }
+  for (let i = 0; i < 24; i++) await ctx.aTools.get('superagent_memory').execute({ action: 'save', key: `background-${i}`, text: 'Ordinary working background. '.repeat(6) })
+  const condition = `${'The draft is prepared. '.repeat(15)}But it MUST NOT be published until the review passes.`
+  await ctx.aTools.get('superagent_memory').execute({ action: 'save', key: 'release.condition', text: condition, priority: 'important' })
+  await ctx.bTools.get('superagent_memory').execute({ action: 'save', key: 'private-local', text: 'OTHER-TOPIC-LOCAL fixture' })
+  await ctx.aTools.get('superagent_dispatch').execute({ title: 'Check required conditions', brief: 'Verify before publishing.' })
+  await tick()
+  const prompt = JSON.stringify(ctx.subagents.spawns[0].spec.prompt)
+  assert.ok(prompt.includes(condition))
+  assert.doesNotMatch(prompt, /OTHER-TOPIC-LOCAL/)
+  assert.match(prompt, /Omitted/)
+  ctx.runtime.stop()
+})
+
+test('native direct user-message events capture query and source before a later context read', async () => {
+  const ctx = setup()
+  ctx.runtime.observeSessionEvent(ctx.first.session, { type: 'user/message', data: { role: 'user', id: 'native-fixture-source', content: [{ type: 'text', text: 'release certification review' }] } })
+  for (const kind of ['runtime-context', 'time-context']) ctx.runtime.observeSessionEvent(ctx.first.session, { type: 'user/message', data: { role: 'user', id: `${kind}-snapshot`, source: { kind }, content: [{ type: 'text', text: 'Generated context must not replace the human request.' }] } })
+  assert.equal(ctx.runtime.withConversation(ctx.aScope, () => ctx.runtime.topicInput().query), 'release certification review')
+  const result = await ctx.aTools.get('superagent_memory').execute({ action: 'save', key: 'source', text: 'Current source test.' })
+  assert.equal(result.entry.source.messageId, 'native-fixture-source')
+  ctx.runtime.stop()
+})

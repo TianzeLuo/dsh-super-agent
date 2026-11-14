@@ -199,6 +199,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
   assert.equal(first.sections.length, 1)
   assert.equal(first.sections[0].name, 'super-agent:router')
   assert.match(first.sections[0].text, /two-layer super-agent/)
+  assert.doesNotMatch(first.sections[0].text, /### Durable facts and topic progress/, 'legacy sessions must not be instructed to call unavailable topic tools')
   assert.equal(first.contexts.length, 1)
   // 两个 pre-execute 监听：confirmation 守卫 + 宿主 goal 工具拒绝（假宿主没有
   // tools.guard，因此走 pre-execute 兜底）。真实宿主优先用 tools.guard。
@@ -314,6 +315,7 @@ test('topics keep native histories but share one owner; concurrent ensures and i
   assert.equal(new Set([main.dataDir, first.dataDir, second.dataDir]).size, 1)
   const topicAgent = rig.sys.agents.get(first.sessionId)
   assert.equal(topicAgent.tools.size, 14)
+  assert.match(topicAgent.sections.map((row) => row.text).join('\n'), /### Durable facts and topic progress/)
   await topicAgent.tools.get('superagent_memory').execute({ action: 'remember', text: 'LOCAL-ONLY fixture' }, {})
   await rig.request('topics', { action: 'shared_notes', instance_id: 'default', notes: 'COMMON fixture' })
   const [viewA, viewB] = await Promise.all([
@@ -324,6 +326,32 @@ test('topics keep native histories but share one owner; concurrent ensures and i
   assert.equal(viewB.router.sessionId, second.sessionId)
   assert.equal(viewA.sharedNotes, 'COMMON fixture')
   assert.match(topicAgent.contexts.map((entry) => entry.text()).join('\n'), /LOCAL-ONLY fixture/)
+  const saved = await rig.request('topics', { action: 'memory', memory_action: 'save', instance_id: 'default', topic_id: a.id, key: 'release.condition', text: 'Prepared; safety checks have NOT passed.', priority: 'important' })
+  const entry = saved.topic.entry
+  assert.equal(saved.memory.topic.find((row) => row.id === entry.id).revision, 1)
+  assert.ok(saved.contextPlan.selected.some((row) => row.id === entry.id))
+  const staleMemory = await rig.sys.routes.get('/api/super-agent/ui/topics').fetch(new Request('http://127.0.0.1/api/super-agent/ui/topics', { method: 'POST', body: JSON.stringify({ action: 'memory', memory_action: 'save', instance_id: 'default', topic_id: a.id, id: entry.id, text: 'Stale approval.', expected_revision: 0 }) }))
+  assert.equal(staleMemory.status, 400)
+  assert.match((await staleMemory.json()).error, /version conflict/)
+  const state = await rig.request('topics', { action: 'state', instance_id: 'default', topic_id: a.id, expected_revision: 0, state: { blocker: 'Safety checks pending.' } })
+  assert.equal(state.topics.find((row) => row.id === a.id).stateRevision, 1)
+  assert.ok(state.contextPlan.usedChars <= state.contextPlan.maxChars)
+  topicAgent.ctx.emit('agent/pre-step', { agent: topicAgent, messages: [{ id: 'pre-step-current', role: 'user', content: [{ type: 'text', text: 'certification review condition' }] }] }, () => undefined)
+  const sourced = await topicAgent.tools.get('superagent_memory').execute({ action: 'save', key: 'pre-step.source', text: 'Current claimed input source.' }, {})
+  assert.equal(sourced.entry.source.messageId, 'pre-step-current', 'source comes from pre-step even before it appears in the session transcript')
+  // Native DSH assembles before pre-step, then re-evaluates registered context
+  // at request admission. The refreshed context must use claimed human input.
+  await rig.request('topics', { action: 'update', instance_id: 'default', topic_id: a.id, name: 'Hydrology' })
+  await topicAgent.tools.get('superagent_memory').execute({ action: 'save', scope: 'instance', key: 'ordinary', text: 'Routine background for a separate subject.' }, {})
+  const readerAgent = rig.sys.agents.get(second.sessionId)
+  const renderReader = () => readerAgent.contexts.find((row) => row.name === 'super-agent:router-state').text()
+  const assembled = renderReader()
+  assert.ok(assembled.indexOf('ordinary\n') < assembled.indexOf(`Topic ${a.id}`), 'unrelated state initially follows ordinary facts')
+  readerAgent.ctx.emit('agent/pre-step', { agent: readerAgent, messages: [{ id: 'claimed-state-query', source: { kind: 'user' }, content: [{ type: 'text', text: 'Hydrology current safety blocker' }] }, { id: 'generated-snapshot', source: { kind: 'time-context' }, content: [{ type: 'text', text: 'Current time.' }] }] }, () => undefined)
+  const admitted = renderReader()
+  assert.ok(admitted.indexOf(`Topic ${a.id}`) < admitted.indexOf('ordinary\n'), 'admission refresh promotes the state relevant to the current claimed input')
+  const refreshedSource = await readerAgent.tools.get('superagent_memory').execute({ action: 'save', key: 'claimed.source', text: 'Human request remains the source.' }, {})
+  assert.equal(refreshedSource.entry.source.messageId, 'claimed-state-query')
   const otherInstance = (await rig.request('instances', { name: 'Separate fixture' })).instance
   const other = await rig.request('ensure', { instance_id: otherInstance.id })
   const selectedA = await rig.request('state', undefined, { instance_id: 'default', topic_id: a.id })
@@ -343,7 +371,7 @@ test('topics keep native histories but share one owner; concurrent ensures and i
   await topicAgent.tools.get('superagent_memory').execute({ action: 'remember', text: 'POST-RESET fixture' }, {})
   const resetState = await rig.request('state', undefined, { instance_id: 'default', topic_id: a.id })
   assert.match(resetState.topics.find((row) => row.id === a.id).notes, /LOCAL-ONLY fixture[\s\S]*POST-RESET fixture/)
-  assert.equal(resetState.sharedNotes, 'COMMON fixture')
+  assert.equal(resetState.sharedNotes, 'COMMON fixture\nRoutine background for a separate subject.')
   assert.equal(rig.created(), 5, 'reset creates only a new overview')
   await rig.close()
 })

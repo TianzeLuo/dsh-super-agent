@@ -379,7 +379,8 @@ queued 任务立即补位；否则 Router 不主动 `close` 时队列会永久�
 
 - `append` 条目注入 Router 和所有 Worker；
 - 项目级 `replace` 在该项目内覆盖全局条目，不删除全局文件；
-- 注入有 `maxItems` / `maxCharsPerItem` / `injectChars` 上限；
+- 保存有 `maxItems` / `maxCharsPerItem` 上限；受管理主题的约定、事实与进展使用统一
+  `context.maxChars` 预算，旧版会话继续用 `injectChars`；两者都只选择完整约定；
 - 文件损坏只记 warning，不阻止 Router 启动；
 - Reset 只换 dataDir，不碰这个文件。
 
@@ -559,8 +560,9 @@ cwd/project、workerSessionId、status、objectiveId、model、createdAt/updated
 ### 同一运行时内的主题会话
 
 每个受管理实例的 `super-agent.topics.json` 登记总览与主题的稳定 ID、宿主 Session ID、
-共享级别、短记录、近期回复摘录与未读数。聊天原文留在宿主 Session，不复制到主题
-注册表。旧 journal 未带 `topicId` 的对象归总览，既有实例和项目开关不需迁移。
+共享级别、带版本的事实条目与四项进展、界面回复线索和未读数。聊天原文留在宿主
+Session，不复制到主题注册表。旧 journal 未带 `topicId` 的对象归总览；格式 1 的短
+记录完整迁移为格式 2 的旧记录条目，首次写入前备份。既有实例和项目开关继续有效。
 
 只有总览认领 Store、journal、租约、Worker 队列和后台定时器。已登记主题只挂同一
 Runtime 的工具和提示词 facade；`AsyncLocalStorage` 在一次工具／UI 请求内绑定主题、
@@ -574,11 +576,18 @@ Agent 与附件来源，不改写全局 `runtime.agent`。任务、报告、审�
 的位置当作其他窗口的请求目标。
 
 私有主题不参与其他主题的上下文、任务详情、Thread 订阅或对象召回。默认状态共享
-只返回标题、状态与短摘录；原文共享须由人类在 UI 显式打开，读取后再次检查权限，
+只返回标题、结构化进展与任务状态；原文共享须由人类在 UI 显式打开，读取后再次检查权限，
 防止等待宿主读取期间撤销共享仍返回内容。读取仅提取 user／assistant 的文本块，
 不启动 Agent，不带工具结果、推理块或附件。预算与可见性见
 [使用说明](usage.md#实例与主题)。这是一层模型上下文约束，宿主账户与文件权限仍是
 最终安全边界；已召回内容无法撤回。
+
+事实按作用域与稳定名称修订，版本不符拒绝写入；归档排除默认读取和注入，最近五版
+用于核对。约定、事实、进展整体选择完整条目，重点遗漏显式警告。DSH 先组装上下文，
+再提供 claimed input，发送请求前刷新动态内容；主题在 `agent/pre-step` 捕获当前认领的
+用户输入，动态提供者在准入刷新时重新选择。队列中的未来消息不参与当前轮；宿主
+生成的 runtime/time context 不覆盖用户问题或记忆来源。设计论证与边界见
+[记忆设计](memory-design.md)，真实场景结果见[场景验证](memory-evaluation.md)。
 
 ## 12. 安全
 
