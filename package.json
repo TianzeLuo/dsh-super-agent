@@ -1,6 +1,6 @@
 {
   "name": "dsh-super-agent",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "private": true,
   "description": "DSH plugin: Router/Worker super-agent with independent topic histories, bounded sharing, a shared task pool, durable triggers, schedules, and channel outbox.",
   "type": "module",

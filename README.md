@@ -55,8 +55,7 @@ dsh plugin --profile web add github:TianzeLuo/dsh-super-agent
 | --- | --- | --- |
 | 左栏 **Super-agent** | 侧栏 | 打开面板；首次使用自动准备独立的 Super-agent Workspace |
 | 直接说话派活 | Router 对话 | Router 自行决定开 Worker 还是直接回答 |
-| 主题栏 **＋** | 面板顶部 | 创建独立主题；默认只分享近期进展，聊天原文须由你另行允许 |
-| **主题与记忆** | 面板顶部 | 管理主题进展、本地／共享记忆，查看本轮选中与省略的上下文 |
+| **主题与记忆** | 主题栏右侧 | 创建独立主题，管理进展、本地／共享记忆，查看本轮上下文；聊天原文共享须由你另行允许 |
 | 项目开关 | 项目根 `.dsh/super-agent.json` | 写入 `{"version":1,"enabled":true}` 才启用；没有文件默认关闭 |
 | 任务徽标 / 报告 | 面板 | 查看状态、补指令（steer）、处理审批 |
 
