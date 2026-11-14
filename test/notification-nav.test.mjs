@@ -325,7 +325,7 @@ test('注册给 away-notify 的 showSession 真的会把请求交给面板队列
 test('定位成功不再弹顶部提示；失败/未知提示照常保留', () => {
   const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
   const start = source.indexOf('const applyReveal = React.useCallback')
-  const end = source.indexOf('}, [adoptSession, switchInstance, routerSessionIds])', start)
+  const end = source.indexOf('// 通知点击的落点。', start)
   assert.ok(start > 0 && end > start, '找得到 applyReveal 的定位分支')
   const reveal = source.slice(start, end)
 

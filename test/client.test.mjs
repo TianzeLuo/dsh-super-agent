@@ -49,7 +49,8 @@ test('client registers the sidebar entry, main panel and session-scoped child', 
 test('client has no project picker or focus endpoint', () => {
   assert.doesNotMatch(client, /FOCUS_KEY|ROUTES\.focus|sa-project-label/)
   assert.doesNotMatch(client, /<select|target project|目标项目/i)
-  assert.match(client, /postJson\(ROUTES\.ensure, targetId\.length > 0/)
+  assert.match(client, /instance_id: targetId/)
+  assert.match(client, /topic_id: targetTopic/)
   assert.match(client, /ROUTES\.instanceActive/)
   assert.match(client, /InstanceSwitcher/)
   assert.match(client, /publishUnread/)

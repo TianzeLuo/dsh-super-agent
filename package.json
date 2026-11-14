@@ -1,8 +1,8 @@
 {
   "name": "dsh-super-agent",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "private": true,
-  "description": "DSH plugin: two-layer Router/Worker super-agent runtime — durable triggers, project-aware autonomous dispatch, thread subscriptions, Inline & Spill recall, async dispatch, watchdog, and channel outbox.",
+  "description": "DSH plugin: Router/Worker super-agent with independent topic histories, bounded sharing, a shared task pool, durable triggers, schedules, and channel outbox.",
   "type": "module",
   "license": "MIT",
   "main": "./lib/index.js",
@@ -31,7 +31,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test"
+    "check:core": "node bin/check.mjs",
+    "test:core": "node --test test/*.test.mjs",
+    "test": "npm run test:core"
   },
   "keywords": [
     "dsh",

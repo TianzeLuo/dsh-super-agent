@@ -546,7 +546,7 @@ cwd/project、workerSessionId、status、objectiveId、model、createdAt/updated
 ## 11. 并发、租约与 HMR
 
 - **进程内**：`claims` Map 以 `dataDir` 为键，存在 `globalThis[Symbol]` 上，
-  宿主 HMR 重新求值模块时不会丢；后开的根会话得到明确 warn 并保持无工具。
+  宿主 HMR 重新求值模块时不会丢；未登记的其他根会话得到 warn 并保持无工具。
 - **跨进程**：`owner.json` 记录 pid。新进程发现 pid 存活且未 `releasedAt` 就拒绝
   启动；pid 死亡或文件损坏则覆盖。
 - **异步竞态**：`dispatch` 返回前只写 queued；`spawnTask` 的每个异步节点都重读
@@ -555,6 +555,30 @@ cwd/project、workerSessionId、status、objectiveId、model、createdAt/updated
   清理全部定时器与监听。
 - **inbox 消费**：`cursor.json` 记录字节偏移；`(source, externalId)` 去重兜底
   重复消费。跨进程追加由 O_APPEND 保证整行不交错（单行有上限）。
+
+### 同一运行时内的主题会话
+
+每个受管理实例的 `super-agent.topics.json` 登记总览与主题的稳定 ID、宿主 Session ID、
+共享级别、短记录、近期回复摘录与未读数。聊天原文留在宿主 Session，不复制到主题
+注册表。旧 journal 未带 `topicId` 的对象归总览，既有实例和项目开关不需迁移。
+
+只有总览认领 Store、journal、租约、Worker 队列和后台定时器。已登记主题只挂同一
+Runtime 的工具和提示词 facade；`AsyncLocalStorage` 在一次工具／UI 请求内绑定主题、
+Agent 与附件来源，不改写全局 `runtime.agent`。任务、报告、审批、目标与 Thread 均
+保留发起主题，合批按主题投递；一个主题忙时不阻塞另一主题。Worker 配额与定时任务
+配额按实例统一计算，定时任务创建串行检查，目标会话仍是发起它的主题。
+
+冷主题被宿主定时器恢复时，`agent/created` 等待总览 Runtime 恢复后再安装工具。
+并发 ensure 合并到同一操作；已有 Session 恢复失败时保留指针，不偷偷换一段新历史。
+人类 UI 每次请求携带实例与主题 ID，服务端分别绑定作用域；不把进程内最后一次选中
+的位置当作其他窗口的请求目标。
+
+私有主题不参与其他主题的上下文、任务详情、Thread 订阅或对象召回。默认状态共享
+只返回标题、状态与短摘录；原文共享须由人类在 UI 显式打开，读取后再次检查权限，
+防止等待宿主读取期间撤销共享仍返回内容。读取仅提取 user／assistant 的文本块，
+不启动 Agent，不带工具结果、推理块或附件。预算与可见性见
+[使用说明](usage.md#实例与主题)。这是一层模型上下文约束，宿主账户与文件权限仍是
+最终安全边界；已召回内容无法撤回。
 
 ## 12. 安全
 

@@ -22,6 +22,18 @@ npm test
   加载已加载的模块。
 - 面板里 `?navdebug=1` 打开导航诊断，详见 [troubleshooting.md](troubleshooting.md)。
 
+## 验证
+
+先跑 `npm run check:core` 检查所有宿主、浏览器与 CLI 模块语法，再跑
+`npm run test:core`（或 `npm test`）执行离线回归。测试入口只选 `test/*.test.mjs`，
+不会自动执行 `test/manual/` 的截图采集脚本。依赖本机证据的用例在缺失时跳过。
+
+主题回归覆盖：单 Store 与共享配额、异步调用作用域、报告／审批归属、附件来源、
+私有状态与对象／Thread 读取、共享撤销竞态、召回预算、并发 ensure、冷主题恢复、
+主题／实例约定和定时任务归属。真实宿主验证应使用全新 DSH_HOME 与测试实例，
+明确固定 Router 和 Worker 的模型，验证并行任务、跨主题召回、重启后定时唤醒、
+浏览器刷新、隐藏／恢复和窄屏管理抽屉。结果记录在[兼容记录](compat-matrix.md)。
+
 ## 边界
 
 - 单机、单进程；状态在项目/实例 dataDir 的 journal 里，只追加。

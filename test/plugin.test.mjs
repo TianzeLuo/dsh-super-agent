@@ -103,7 +103,7 @@ function fakeCordis() {
       }
     },
     emit(event, ...payload) {
-      for (const handler of [...(handlers.get(event) ?? [])]) handler(...payload)
+      return Promise.all([...(handlers.get(event) ?? [])].map((handler) => handler(...payload)))
     },
   }
 }
@@ -225,6 +225,8 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
     '/api/super-agent/ui/state',
     '/api/super-agent/ui/task',
     '/api/super-agent/ui/task/steer',
+    '/api/super-agent/ui/topics',
+    '/api/super-agent/ui/topics/ensure',
   ])
 
   assert.ok(first.tools.get('superagent_dispatch').parameters.properties.reuse_task_id)
@@ -254,6 +256,124 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
   sys.emit('agent/created', { agent: third })
   assert.equal(third.tools.size, 11)
   sys.emit('agent/disposed', { agent: third })
+})
+
+async function topicRig(home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-topic-host-')), persisted = new Map()) {
+  const sys = fakeCordis()
+  let created = 0
+  const activate = async (id) => {
+    if (sys.agents.has(id)) return sys.agents.get(id)
+    const header = persisted.get(id)
+    if (!header) return undefined
+    const agent = fakeAgent({ id, cwd: header.cwd })
+    agent.session.deriveMessages = () => header.messages ?? []
+    sys.agents.set(id, agent)
+    await sys.emit('agent/created', { agent })
+    return agent
+  }
+  sys.scoped.sessionController = {
+    async create({ cwd, sessionId }) {
+      created++
+      persisted.set(sessionId, { cwd, messages: [] })
+      await activate(sessionId)
+      return { sessionId }
+    },
+    async resolveAgent(id) { return { agent: await activate(id) } },
+    async rename() {},
+    async prompt() {},
+  }
+  apply(sys.root, { superAgentHome: home })
+  const request = async (path, body, query = {}) => {
+    const url = new URL(`http://127.0.0.1/api/super-agent/ui/${path}`)
+    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
+    const response = await sys.routes.get(url.pathname).fetch(new Request(url, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }))
+    const value = await response.json()
+    assert.equal(response.status, 200, JSON.stringify(value))
+    return value
+  }
+  const close = async () => { for (const agent of [...sys.agents.values()]) await sys.emit('agent/disposed', { agent }) }
+  return { sys, home, persisted, request, activate, close, created: () => created }
+}
+
+test('topics keep native histories but share one owner; concurrent ensures and independent UI contexts', async () => {
+  const rig = await topicRig()
+  const main = await rig.request('ensure', { instance_id: 'default' })
+  const a = (await rig.request('topics', { action: 'create', name: 'Writing fixture', instance_id: 'default' })).topic
+  const b = (await rig.request('topics', { action: 'create', name: 'Planning fixture', instance_id: 'default' })).topic
+  const [first, duplicate, second] = await Promise.all([
+    rig.request('topics/ensure', { instance_id: 'default', topic_id: a.id }),
+    rig.request('topics/ensure', { instance_id: 'default', topic_id: a.id }),
+    rig.request('topics/ensure', { instance_id: 'default', topic_id: b.id }),
+  ])
+  assert.equal(first.sessionId, duplicate.sessionId)
+  assert.notEqual(first.sessionId, second.sessionId)
+  assert.equal(rig.created(), 3, 'only one overview plus two native topic sessions')
+  const reset = await rig.sys.routes.get('/api/super-agent/ui/reset').fetch(new Request(`http://127.0.0.1/api/super-agent/ui/reset?instance_id=default&topic_id=${a.id}`, { method: 'POST', body: '{}' }))
+  assert.equal(reset.status, 400, 'a topic cannot accidentally reset the entire instance')
+  assert.equal(rig.created(), 3)
+  assert.equal(new Set([main.dataDir, first.dataDir, second.dataDir]).size, 1)
+  const topicAgent = rig.sys.agents.get(first.sessionId)
+  assert.equal(topicAgent.tools.size, 14)
+  await topicAgent.tools.get('superagent_memory').execute({ action: 'remember', text: 'LOCAL-ONLY fixture' }, {})
+  await rig.request('topics', { action: 'shared_notes', instance_id: 'default', notes: 'COMMON fixture' })
+  const [viewA, viewB] = await Promise.all([
+    rig.request('state', undefined, { instance_id: 'default', topic_id: a.id }),
+    rig.request('state', undefined, { instance_id: 'default', topic_id: b.id }),
+  ])
+  assert.equal(viewA.router.sessionId, first.sessionId)
+  assert.equal(viewB.router.sessionId, second.sessionId)
+  assert.equal(viewA.sharedNotes, 'COMMON fixture')
+  assert.match(topicAgent.contexts.map((entry) => entry.text()).join('\n'), /LOCAL-ONLY fixture/)
+  const otherInstance = (await rig.request('instances', { name: 'Separate fixture' })).instance
+  const other = await rig.request('ensure', { instance_id: otherInstance.id })
+  const selectedA = await rig.request('state', undefined, { instance_id: 'default', topic_id: a.id })
+  assert.equal(selectedA.router.sessionId, first.sessionId, 'another window changing the active instance cannot redirect this request')
+  assert.notEqual(other.dataDir, first.dataDir)
+  assert.equal((await rig.request('state', undefined, { instance_id: otherInstance.id })).sharedNotes, '')
+  const canceled = []
+  for (const sessionId of [main.sessionId, first.sessionId, second.sessionId, other.sessionId]) {
+    rig.sys.agents.get(sessionId).cancel = () => { canceled.push(sessionId) }
+  }
+  const resetMain = await rig.request('reset', { instance_id: 'default', topic_id: 'main' })
+  assert.deepEqual(canceled.sort(), [main.sessionId, first.sessionId, second.sessionId].sort(), 'instance reset stops all its topic turns without stopping another instance')
+  assert.notEqual(resetMain.sessionId, main.sessionId)
+  const retained = await rig.request('topics/ensure', { instance_id: 'default', topic_id: a.id })
+  assert.equal(retained.sessionId, first.sessionId, 'reset preserves native topic history')
+  assert.equal(retained.dataDir, resetMain.dataDir, 'live topic tools rebind to the new shared runtime')
+  await topicAgent.tools.get('superagent_memory').execute({ action: 'remember', text: 'POST-RESET fixture' }, {})
+  const resetState = await rig.request('state', undefined, { instance_id: 'default', topic_id: a.id })
+  assert.match(resetState.topics.find((row) => row.id === a.id).notes, /LOCAL-ONLY fixture[\s\S]*POST-RESET fixture/)
+  assert.equal(resetState.sharedNotes, 'COMMON fixture')
+  assert.equal(rig.created(), 5, 'reset creates only a new overview')
+  await rig.close()
+})
+
+test('history sharing is explicit and read-only; restart and timer-first resume preserve topic identity', async () => {
+  const rig = await topicRig()
+  const main = await rig.request('ensure', { instance_id: 'default' })
+  const a = (await rig.request('topics', { action: 'create', name: 'Source fixture', instance_id: 'default' })).topic
+  const b = (await rig.request('topics', { action: 'create', name: 'Reader fixture', instance_id: 'default' })).topic
+  const source = await rig.request('topics/ensure', { instance_id: 'default', topic_id: a.id })
+  const reader = await rig.request('topics/ensure', { instance_id: 'default', topic_id: b.id })
+  rig.persisted.get(source.sessionId).messages.push({ id: 'fixture-message', role: 'user', content: [{ type: 'text', text: 'ORIGINAL-DECISION fixture' }] })
+  const tool = rig.sys.agents.get(reader.sessionId).tools.get('superagent_history')
+  await assert.rejects(tool.execute({ topic_id: a.id, detail: 'messages' }, {}), /status only/)
+  await rig.request('topics', { instance_id: 'default', topic_id: a.id, sharing: 'history', notes: 'PERSISTED fixture' })
+  const history = await tool.execute({ topic_id: a.id, detail: 'messages' }, {})
+  assert.match(JSON.stringify(history), /ORIGINAL-DECISION fixture|fixture-message/)
+  const before = rig.created()
+  assert.equal(rig.created(), before, 'recall must not create a session')
+  await rig.close()
+  const resumed = await topicRig(rig.home, rig.persisted)
+  const coldTopic = await resumed.activate(source.sessionId)
+  assert.equal(coldTopic.tools.size, 14, 'cold topic lifecycle waits for the owning runtime before accepting a timer prompt')
+  assert.ok(resumed.sys.agents.has(main.sessionId), 'overview restored as owner')
+  assert.equal(resumed.created(), 0, 'existing native histories are restored, never replaced')
+  const state = await resumed.request('state', undefined, { instance_id: 'default', topic_id: a.id })
+  assert.equal(state.router.sessionId, source.sessionId)
+  assert.equal(state.topics.find((row) => row.id === a.id).notes, 'PERSISTED fixture')
+  assert.equal(state.topics.find((row) => row.id === a.id).sharing, 'history')
+  await resumed.close()
 })
 
 test('HTTP ingest and outbox routes operate on the runtime', async () => {
@@ -320,7 +440,7 @@ test('an uninitialized project stays inert', async () => {
   assert.equal(agent.tools.size, 0)
   assert.equal(agent.sections.length, 0)
   // UI 入口必须先于 Router 存在；工具/提示词仍然完全不注册。
-  assert.equal(sys.routes.size, 19)
+  assert.equal(sys.routes.size, 21)
 })
 
 test('UI ensure creates a Router through the generic Session API and focus updates it', async () => {
@@ -450,7 +570,7 @@ test('UI ensure without cwd uses an independent Super-agent workspace', async ()
   assert.ok(existsSync(join(home, '.dsh', 'super-agent.json')))
   assert.deepEqual(created.map((workspace) => [workspace.title, workspace.path]), [['Super-agent Workspace', home]])
   assert.deepEqual(attached, [body.sessionId])
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 11)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 14)
   const projectTool = await sys.agents.get(body.sessionId).tools.get('superagent_projects').execute({}, {})
   assert.deepEqual(projectTool.projects.map((project) => project.title), ['alpha'])
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
@@ -659,7 +779,7 @@ test('the dedicated Router takes precedence over an older project Router', async
   assert.equal(response.status, 200)
   assert.equal(body.projectRoot, home)
   assert.notEqual(body.sessionId, old.id)
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 11)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 14)
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
   )
@@ -729,7 +849,7 @@ test('UI reset starts a fresh dataDir generation and archives active workers', a
   assert.match(body.dataDir, /super-agent-resets[\\/]gen-/)
   assert.ok(archived.every((sessionId) => sessionId !== oldSession))
   assert.ok(archived.includes(activeWorker))
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 11)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 14)
   const state = await (await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
   )).json()

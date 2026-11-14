@@ -6,11 +6,48 @@
 ## 安装
 
 ```sh
-dsh plugin --profile web add /abs/path/to/dsh-super-agent
+dsh plugin --profile web add github:TianzeLuo/dsh-super-agent
 ```
 
 安装后重启 `dsh web`，硬刷新浏览器，左栏点击 **Super-agent**。首次使用会自动
 创建独立的 Super-agent Workspace，不需要先选工作区。
+
+## 实例与主题
+
+实例仍是互相独立的 Super-agent，配置、任务与状态目录分别保存。每个实例有一个
+「总览」，可以用主题栏的 **＋** 添加写作、开发、日常等主题。主题是独立的宿主聊天
+会话，共用本实例的控制面，不再启动另一套调度器，也不支持递归创建子实例。
+
+切换主题只切换对话历史与本地记录；任务报告、审批提醒和定时唤醒回到发起主题。
+「本主题任务／全部任务」切换看板范围。每个浏览器标签页独立保存所选实例和主题，
+另一窗口切换位置不会改变这边请求的目标。总览默认展示全部任务；人类操作者可管理
+本实例所有主题，模型读取则受下表限制。
+
+| 主题共享设置 | 其他主题的模型可见内容 |
+| --- | --- |
+| 不分享 | 不出现在主题列表、状态和任务召回中 |
+| 仅分享进展（默认） | 主题名、近期可见回复的短摘录、时间和任务标题／状态；不含 brief、报告正文、附件或本地记录 |
+| 允许按需读取聊天原文 | 上述内容及按需读取的 user／assistant 文本、相关任务详情；不包含工具输出、思考过程或附件字节 |
+
+近期摘录只是会话说过什么的线索，不代表工作已验收。共享记录是你明确要对整个实例
+开放的简短事实／决定；本主题记录只注入本主题。长期行为约定在主题中默认保存到
+本主题，可显式选择「本实例全部主题」；总览默认保存实例约定。既有实例约定继续生效。
+项目约定仍可在这些范围内按项目筛选。记录与召回内容都不能授予新权限。
+
+每个实例最多 32 个主题（含总览）。名称最多 60 字符；本地记录与共享记录分别最多
+4000 字符，自动上下文各取前 2000 字符。近期进展最多取其他 5 个主题，总预算
+1500 字符（含提示文字）。原文召回每回合最多 2 次、合计 6000 个序列化字符，默认
+每次 3000；最多返回 8 条消息，每条正文最多 1200 字符。默认看最近 100 条可见消息，
+关键词只搜索该窗口；可用返回的消息 ID 向前翻页。没有全文索引或向量数据库。
+宿主未提供已加载历史时明确报不可用，不为召回启动 Agent。
+
+隐藏主题会收起标签并停止向其他主题分享，保留历史和记录；任务与定时任务仍继续，
+可从主题管理中恢复。重置是整个实例的操作，必须在总览中发起；新一代任务状态与
+新总览会话不清除主题历史和记录。
+
+共享开关只能限制后续模型工具读取，无法收回已进入其他对话或任务 brief 的内容。
+同一实例仍使用同一宿主账户和文件权限；它不是多租户或操作系统安全边界。
+敏感工作应使用独立实例及宿主权限隔离。不要将凭据写入记录。
 
 ## UI
 
@@ -41,9 +78,9 @@ dsh plugin --profile web add /abs/path/to/dsh-super-agent
 - 「Rules」维护长期工作约定：全局或项目、追加或覆盖全局；可停用/编辑/删除。
 - 「Schedules」创建和取消定时唤醒：一次、每日、每周、Cron 或绝对时间；可
   「立即执行」一次。上限由 `schedule.maxActive` 控制。
-- 「Reset」二次确认后中止当前 Worker、取消当前 Router 的定时任务（reminder 绑定
-  会话，旧会话隐藏后不应继续唤醒）、切换新的 dataDir generation、创建新 Router；
-  旧 Worker 归档，旧 Router 会话保留但隐藏。长期约定文件不随 Reset 丢失。
+- 「Reset」只在总览发起，二次确认后中止本实例的 Worker 和各主题当前回合、取消
+  本实例所有主题的定时任务，切换新的 dataDir generation、创建新 Router；旧 Worker
+  归档，旧 Router 会话保留但隐藏。主题历史、记录与长期约定保留，其他实例不受影响。
 - Worker Session 不出现在侧栏，`[super-agent]` 内部 trigger 不出现在聊天流。
 - 点通知（[dsh-away-notify](https://github.com/TianzeLuo/dsh-away-notify)）会回到产生它的**实例 + 会话**：选中面板 → 切实例 →
   adopt 那条会话。成功定位不弹顶部提示（跳转本身已说明结果）；只有认不出会话或
@@ -357,9 +394,11 @@ node bin/super-agent.mjs config
 | GET | `/api/super-agent/status` | 健康状态 + 紧凑快照 |
 | GET | `/api/super-agent/outbox?channel=im&since=…` | 读待发送的人类消息 |
 | GET | `/api/super-agent/ui/state` | 面板状态、项目、任务、workspace sessions |
-| POST | `/api/super-agent/ui/ensure` | 确保 Router；body 可省略，或传 `{"cwd":"/abs/project"}` |
+| POST | `/api/super-agent/ui/ensure` | 确保总览或主题；可传 `instance_id`、`topic_id`，兼容旧 `cwd` |
+| GET/POST | `/api/super-agent/ui/topics` | 查看、创建、修改或隐藏／恢复主题；编辑共享记录 |
+| POST | `/api/super-agent/ui/topics/ensure` | 创建／恢复已登记主题的宿主会话；必传 `instance_id`、`topic_id` |
 | POST | `/api/super-agent/ui/focus` | 兼容旧脚本的 focus 设置 |
-| POST | `/api/super-agent/ui/reset` | 中止并归档 Worker、取消定时任务、切换 generation、创建新 Router |
+| POST | `/api/super-agent/ui/reset` | 仅总览可用：中止并归档本实例 Worker、取消定时任务、切换 generation、创建新总览 |
 | GET | `/api/super-agent/ui/activity?limit=N&cursor=…` | 近期活动（含已结束）。进行中优先；`limit` 默认 20、最大 500，返回 `total` / `nextCursor` / `hasMore` |
 | GET | `/api/super-agent/ui/task?task_id=…` | 单个任务详情：Brief、报告、线程、Worker 是否在线 |
 | POST | `/api/super-agent/ui/task/steer` | 给在线 Worker 发一条指令，body `{task_id,text,interrupt?}`；`interrupt` 默认 true（插队到当前 run 的下一步），false 为排队；`mode:"queue"` 是等价别名 |

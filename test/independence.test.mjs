@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, lstatSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
-const root = new URL('..', import.meta.url).pathname
+const root = fileURLToPath(new URL('..', import.meta.url))
 const libDir = join(root, 'lib')
 
 function jsFiles(dir) {
   const out = []
   for (const name of readdirSync(dir)) {
     const path = join(dir, name)
-    if (statSync(path).isDirectory()) out.push(...jsFiles(path))
+    const entry = lstatSync(path)
+    if (entry.isSymbolicLink()) continue
+    if (entry.isDirectory()) out.push(...jsFiles(path))
     else if (name.endsWith('.js') || name.endsWith('.mjs')) out.push(path)
   }
   return out
