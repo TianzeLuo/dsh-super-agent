@@ -19,40 +19,40 @@ const {
   ACTIVITY_DEFAULT_VISIBLE,
 } = internals
 
-test('activity UI defaults to one 20-row page while the title counts the total', () => {
-  assert.equal(ACTIVITY_PAGE_SIZE, 20)
-  assert.equal(ACTIVITY_DEFAULT_VISIBLE, 20)
-  const list = initialActivityList({ loaded: 20, total: 126 })
+test('activity UI defaults to six rows while the title counts the total', () => {
+  assert.equal(ACTIVITY_PAGE_SIZE, 6)
+  assert.equal(ACTIVITY_DEFAULT_VISIBLE, 6)
+  const list = initialActivityList({ loaded: 6, total: 15 })
   const summary = activityListSummary(list)
-  assert.equal(summary.total, 126)
-  assert.equal(summary.shown, 20)
+  assert.equal(summary.total, 15)
+  assert.equal(summary.shown, 6)
   assert.equal(summary.allLoaded, false)
   assert.equal(summary.canLoadMore, true)
   assert.equal(summary.collapsed, false)
 })
 
 test('show more appends a batch, shows loading, and ends at all loaded', () => {
-  let list = initialActivityList({ loaded: 20, total: 126 })
+  let list = initialActivityList({ loaded: 6, total: 15 })
   list = activityListNext(list, { type: 'more-start' })
   assert.equal(activityListSummary(list).loading, true)
   assert.equal(activityListSummary(list).canLoadMore, false, 'loading blocks a second click')
 
-  list = activityListNext(list, { type: 'more-done', added: 20, loaded: 40, total: 126, hasMore: true })
-  assert.equal(activityListSummary(list).shown, 40)
-  assert.equal(activityListSummary(list).total, 126)
+  list = activityListNext(list, { type: 'more-done', added: 6, loaded: 12, total: 15, hasMore: true })
+  assert.equal(activityListSummary(list).shown, 12)
+  assert.equal(activityListSummary(list).total, 15)
   assert.equal(activityListSummary(list).canLoadMore, true)
 
-  list = activityListNext(list, { type: 'more-done', added: 86, loaded: 126, total: 126, hasMore: false })
-  assert.equal(activityListSummary(list).shown, 126)
+  list = activityListNext(list, { type: 'more-done', added: 3, loaded: 15, total: 15, hasMore: false })
+  assert.equal(activityListSummary(list).shown, 15)
   assert.equal(activityListSummary(list).allLoaded, true)
   assert.equal(activityListSummary(list).canLoadMore, false)
-  assert.equal(activityListSummary(list).total, 126)
+  assert.equal(activityListSummary(list).total, 15)
 })
 
 test('collapse keeps the total and expand restores the default count, not all rows', () => {
-  let list = initialActivityList({ loaded: 60, total: 126 })
-  list = activityListNext(list, { type: 'more-done', added: 40, loaded: 60, total: 126, hasMore: true })
-  assert.equal(activityListSummary(list).shown, 60)
+  let list = initialActivityList({ loaded: 18, total: 126 })
+  list = activityListNext(list, { type: 'more-done', added: 12, loaded: 18, total: 126, hasMore: true })
+  assert.equal(activityListSummary(list).shown, 18)
 
   list = activityListNext(list, { type: 'collapse' })
   assert.equal(activityListSummary(list).collapsed, true)
@@ -63,13 +63,28 @@ test('collapse keeps the total and expand restores the default count, not all ro
   const summary = activityListSummary(list)
   assert.equal(summary.collapsed, false)
   assert.equal(summary.total, 126)
-  assert.equal(summary.shown, 20, 'expanding restores the default 20, not all 60 loaded rows')
+  assert.equal(summary.shown, 6, 'expanding restores six rows instead of showing the entire cache')
   assert.equal(summary.canLoadMore, true)
 
   list = activityListNext(list, { type: 'more-start' })
   list = activityListNext(list, { type: 'more-fail' })
   assert.equal(activityListSummary(list).loading, false)
-  assert.equal(activityListSummary(list).shown, 20)
+  assert.equal(activityListSummary(list).shown, 6)
+})
+
+test('a fully loaded list can reveal its cached rows again after collapse', () => {
+  let list = initialActivityList({ loaded: 6, total: 15 })
+  list = activityListNext(list, { type: 'more-done', added: 9, loaded: 15, total: 15, hasMore: false })
+  assert.equal(activityListSummary(list).allLoaded, true)
+  list = activityListNext(list, { type: 'collapse' })
+  list = activityListNext(list, { type: 'expand' })
+  assert.equal(activityListSummary(list).shown, 6)
+  assert.equal(activityListSummary(list).canLoadMore, true)
+  list = activityListNext(list, { type: 'reveal-more' })
+  assert.equal(activityListSummary(list).shown, 12)
+  list = activityListNext(list, { type: 'reveal-more' })
+  assert.equal(activityListSummary(list).shown, 15)
+  assert.equal(activityListSummary(list).allLoaded, true)
 })
 
 test('empty activity has no more button and a finished batch reports all loaded', () => {

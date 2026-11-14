@@ -115,6 +115,37 @@ test('task scope is controlled from recent activity and sends an explicit target
   assert.ok(scope.props.options.every((option) => option.description))
 })
 
+test('recent activity shows six rows and reveals cached pages after collapse without fetching again', () => {
+  const { api, render } = harness()
+  const tasks = Array.from({ length: 13 }, (_, i) => ({ id: `fixture-${i}`, status: 'closed' }))
+  let requests = 0
+  const props = { t, tasks, total: tasks.length, scope: 'instance', onLoadMore: () => { requests++; throw new Error('cached rows must not be fetched again') } }
+  let tree
+  const shown = () => nodes(tree, (node) => node.props.task?.id?.startsWith('fixture-')).length
+  const more = () => nodes(tree, (node) => node.props.className === 'sa-more-button')[0]
+  const toggle = () => nodes(tree, (node) => node.props.className === 'sa-activity-collapse')[0]
+  tree = render(api.ActivityRail, props)
+  assert.equal(shown(), 6)
+  more().props.onClick()
+  tree = render(api.ActivityRail, props)
+  assert.equal(shown(), 12)
+  more().props.onClick()
+  tree = render(api.ActivityRail, props)
+  assert.equal(shown(), 13)
+  assert.equal(more().props.disabled, true)
+  toggle().props.onClick()
+  tree = render(api.ActivityRail, props)
+  assert.equal(shown(), 0)
+  toggle().props.onClick()
+  tree = render(api.ActivityRail, props)
+  assert.equal(shown(), 6)
+  assert.equal(more().props.disabled, false)
+  more().props.onClick()
+  tree = render(api.ActivityRail, props)
+  assert.equal(shown(), 12)
+  assert.equal(requests, 0)
+})
+
 test('sharing choices explain their boundaries and the select supports keyboard navigation and escape', () => {
   const document = { activeElement: undefined }
   const { api, render } = harness({ document, window: { innerWidth: 390, innerHeight: 600 } })
