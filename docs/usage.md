@@ -66,7 +66,12 @@ AI 在对话有实质进展时维护；开始聊天前无需填写，也可展�
 **整理记忆**。自动整理默认等相关对话和任务空闲 15 分钟，只处理原分身或原群的材料，
 不会自动发布到实例共享记忆。人工保存和明确要求记住的记录不由后台改写；直接聊天
 纠正，或主动整理，才会检查这些内容。主动整理也可仅处理已保存内容，无需创建聊天。
-没有有用变化时不改条目版本。模型调用沿用实例 Worker 模型选择，不创建执行会话。
+没有有用变化时不改条目版本。
+
+在同页展开 **记忆模型设置**，可以从 DSH 模型目录选择模型与该模型支持的思考强度。
+设置随实例保存，供手动整理、空闲整理和显式保存的意图核对使用。默认选项 **跟随 Worker 默认**
+沿用当前实例的 Worker 默认模型和思考强度。单独选择模型后，可选该模型的默认思考强度。
+如果已选模型或强度失效，记忆调用会报错，可以在同页改选或恢复跟随 Worker 默认。
 
 `superagent_memory` 支持 `read/save/archive/restore/state`。读取默认只含当前有效版本，
 可按 `scope/query/id` 查询，用 `after` 翻页，显式请求归档或最近修订；默认每次 6000、
@@ -490,7 +495,7 @@ node bin/super-agent.mjs config
 | GET | `/api/super-agent/outbox?channel=im&since=…` | 读待发送的人类消息 |
 | GET | `/api/super-agent/ui/state` | 面板状态、项目、任务、workspace sessions |
 | POST | `/api/super-agent/ui/ensure` | 确保总览或主题；可传 `instance_id`、`topic_id`，兼容旧 `cwd` |
-| GET/POST | `/api/super-agent/ui/topics` | 管理主题与事实、主动整理、开关本实例自动整理 |
+| GET/POST | `/api/super-agent/ui/topics` | 管理主题与事实、主动整理、配置本实例的自动整理与记忆模型 |
 | POST | `/api/super-agent/ui/topics/ensure` | 创建／恢复已登记主题的宿主会话；必传 `instance_id`、`topic_id` |
 | POST | `/api/super-agent/ui/focus` | 兼容旧脚本的 focus 设置 |
 | POST | `/api/super-agent/ui/reset` | 仅总览可用：中止并归档本实例 Worker、取消定时任务、切换 generation、创建新总览 |
@@ -508,6 +513,10 @@ node bin/super-agent.mjs config
 `run: true`；开关提交同一 action 与 `auto: true | false`。携带 `instance_id/topic_id`
 定位实例和分身。群整理向协作接口提交同一 action、`group_id` 与 `run: true`。
 这些是操作者界面入口，不向模型开放范围或权限配置。
+
+主题接口的 `GET ?memory_models=1` 返回宿主模型和可选思考强度。提交
+`action: "memory_model"` 与 `selection: { provider, model, reasoningEffort? }` 保存本实例选择。
+`selection: null` 恢复跟随 Worker 默认，省略 `reasoningEffort` 则使用所选模型的默认强度。
 
 ## 配置文件
 

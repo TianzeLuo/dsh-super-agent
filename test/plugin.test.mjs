@@ -263,11 +263,13 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
   sys.emit('agent/disposed', { agent: third })
 })
 
-async function topicRig(home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-topic-host-')), persisted = new Map()) {
+async function topicRig(home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-topic-host-')), persisted = new Map(), catalog) {
   const sys = fakeCordis()
+  const modelCalls = []
   sys.scoped.agentDefaultModel = { currentSelection: () => ({ provider: 'fixture', model: 'memory' }) }
   sys.scoped.llm = { async *stream(options) {
     const input = JSON.parse(options.messages[0].content[0].text)
+    modelCalls.push({ provider: options.provider, model: options.model, reasoningEffort: options.reasoningEffort })
     yield { type: 'text-delta', text: JSON.stringify(input.proposal ? { decision: 'apply', text: input.proposal.text, reason: 'Fixture intent decision.' } : { operations: [], reason: 'Fixture no-op.' }) }
     yield { type: 'finish', reason: { kind: 'stop' } }
   } }
@@ -290,21 +292,75 @@ async function topicRig(home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-topic
       return { sessionId }
     },
     async resolveAgent(id) { return { agent: await activate(id) } },
+    ...(catalog ? { async modelCatalog() { return catalog } } : {}),
     async rename() {},
     async prompt() {},
   }
   apply(sys.root, { superAgentHome: home })
-  const request = async (path, body, query = {}) => {
+  const request = async (path, body, query = {}, expectedStatus = 200) => {
     const url = new URL(`http://127.0.0.1/api/super-agent/ui/${path}`)
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
     const response = await sys.routes.get(url.pathname).fetch(new Request(url, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }))
     const value = await response.json()
-    assert.equal(response.status, 200, JSON.stringify(value))
+    assert.equal(response.status, expectedStatus, JSON.stringify(value))
     return value
   }
   const close = async () => { for (const agent of [...sys.agents.values()]) await sys.emit('agent/disposed', { agent }) }
-  return { sys, home, persisted, request, activate, close, created: () => created }
+  return { sys, home, persisted, request, activate, close, modelCalls, created: () => created }
 }
+
+test('memory model settings persist per instance, validate against the host catalog and resolve independently of Worker dispatch', async () => {
+  const catalog = { groups: [
+    { id: 'fixture', models: [{ id: 'worker', reasoning: { efforts: [{ id: 'low' }], defaultEffort: 'low' } }] },
+    { id: 'curator', models: [{ id: 'memory', reasoning: { efforts: [{ id: 'medium' }, { id: 'high' }], defaultEffort: 'medium' } }] },
+  ] }
+  const rig = await topicRig(undefined, undefined, catalog)
+  const overview = await rig.request('ensure', { instance_id: 'default' })
+  const query = { instance_id: 'default' }
+  const worker = { provider: 'fixture', model: 'worker' }
+  const selected = { provider: 'curator', model: 'memory', reasoningEffort: 'high' }
+  const organize = { action: 'memory_review', scope: 'topic', run: true }
+  const configure = (selection) => ({ action: 'memory_model', selection })
+  await rig.request('models', { allowed: [worker] }, query)
+  assert.equal((await rig.request('topics', undefined, query)).memory.review.modelSelection, null)
+  await rig.request('topics', organize, query)
+  assert.deepEqual(rig.modelCalls.at(-1), { ...worker, reasoningEffort: 'low' })
+
+  const options = await rig.request('topics', undefined, { ...query, memory_models: '1' })
+  assert.deepEqual(options.models.map(({ provider, model }) => ({ provider, model })), [worker, { provider: 'curator', model: 'memory' }])
+  assert.equal((await rig.request('topics', configure(selected), query)).memory.review.modelSelection.reasoningEffort, 'high')
+  assert.match((await rig.request('topics', configure({ ...selected, reasoningEffort: 'low' }), query, 400)).error, /does not support/)
+  assert.match((await rig.request('topics', configure(undefined), query, 400)).error, /provider and model/)
+  assert.deepEqual((await rig.request('models', undefined, query)).models.map(({ model }) => model), ['worker'])
+  await rig.request('topics', organize, query)
+  assert.deepEqual(rig.modelCalls.at(-1), selected)
+
+  const owner = rig.sys.agents.get(overview.sessionId)
+  owner.ctx.emit('agent/pre-step', { agent: owner, messages: [{ id: 'fixture-human', role: 'user', content: 'Remember the release process.' }] }, () => undefined)
+  await owner.tools.get('superagent_memory').execute({ action: 'save', key: 'release-process', text: 'Run validation before release.' }, {})
+  assert.deepEqual(rig.modelCalls.at(-1), selected)
+
+  const other = (await rig.request('instances', { name: 'Other memory settings' })).instance
+  await rig.request('ensure', { instance_id: other.id })
+  assert.equal((await rig.request('topics', undefined, { instance_id: other.id })).memory.review.modelSelection, null)
+  await rig.close()
+
+  const restored = await topicRig(rig.home, rig.persisted, catalog)
+  await restored.request('ensure', { instance_id: 'default' })
+  assert.deepEqual((await restored.request('topics', undefined, query)).memory.review.modelSelection, selected)
+  await restored.request('topics', configure({ provider: selected.provider, model: selected.model }), query)
+  await restored.request('topics', organize, query)
+  assert.deepEqual(restored.modelCalls.at(-1), { ...selected, reasoningEffort: 'medium' })
+
+  catalog.groups.pop()
+  const callCount = restored.modelCalls.length
+  assert.match((await restored.request('topics', organize, query, 400)).error, /unavailable in DSH/)
+  assert.equal(restored.modelCalls.length, callCount, 'an explicit unavailable choice must not send evidence through the Worker default')
+  assert.equal((await restored.request('topics', configure(null), query)).memory.review.modelSelection, null)
+  await restored.request('topics', organize, query)
+  assert.deepEqual(restored.modelCalls.at(-1), { ...worker, reasoningEffort: 'low' })
+  await restored.close()
+})
 
 test('topics keep native histories but share one owner; concurrent ensures and independent UI contexts', async () => {
   const rig = await topicRig()

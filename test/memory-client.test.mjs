@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { loadClientBundle } from './client-bundle.mjs'
 
-function harness() {
+function harness({ useEffect = () => {} } = {}) {
   const state = []
   let cursor = 0
   const React = {
@@ -13,7 +13,7 @@ function harness() {
       if (!(index in state)) state[index] = typeof initial === 'function' ? initial() : initial
       return [state[index], (next) => { state[index] = typeof next === 'function' ? next(state[index]) : next }]
     },
-    useEffect() {}, useRef: (current) => ({ current }), useCallback: (fn) => fn, useMemo: (fn) => fn(),
+    useEffect, useRef: (current) => ({ current }), useCallback: (fn) => fn, useMemo: (fn) => fn(),
   }
   const api = loadClientBundle({ react: React }).__internals
   return { api, render(component, props) { cursor = 0; return component(props) } }
@@ -129,4 +129,41 @@ test('manual organization announces work immediately, before the server returns 
   assert.equal(nodes(tree, (node) => node.type === 'button' && node.children.includes('memoryOrganizing'))[0].props.disabled, true)
   assert.ok(nodes(tree, (node) => node.props.role === 'status').some((node) => node.children.includes('memoryOrganizing')))
   release(true); await pending
+})
+
+test('memory settings show model-specific efforts, keep a rejected draft and send explicit reset', async () => {
+  let effect, loadCount = 0
+  const { api, render } = harness({ useEffect: (fn) => { effect = fn } })
+  const saves = []
+  const props = { t, selection: null, loadModels: async () => {
+    loadCount++
+    return { models: [
+      { provider: 'fixture', providerName: 'Fixture', model: 'detailed', name: 'Detailed', efforts: [{ id: 'high', name: 'High' }] },
+      { provider: 'fixture', providerName: 'Fixture', model: 'fast', name: 'Fast', efforts: [{ id: 'low', name: 'Low' }] },
+    ] }
+  }, onSave: async (next) => { saves.push(next); return false } }
+  const draw = () => render(api.MemoryModelSettings, props)
+  const control = (view, name) => nodes(view, ({ props }) => props.ariaLabel === name)[0].props
+  const submit = (view) => nodes(view, ({ type }) => type === 'form')[0].props.onSubmit({ preventDefault() {} })
+  let tree = draw()
+  assert.equal(effect(), undefined)
+  assert.equal(loadCount, 0)
+  tree.props.onToggle({ currentTarget: { open: true } })
+  draw(); effect()
+  await Promise.resolve()
+  const model = control(draw(), 'memoryModel')
+  assert.equal(model.value, '')
+  model.onChange(model.options.find(({ label }) => label.includes('Detailed')).value)
+  control(draw(), 'memoryModelEffort').onChange('high')
+  await submit(draw())
+  assert.deepEqual(saves[0], { provider: 'fixture', model: 'detailed', reasoningEffort: 'high' })
+  tree = draw()
+  assert.equal(control(tree, 'memoryModelEffort').value, 'high')
+  control(tree, 'memoryModel').onChange(model.options.find(({ label }) => label.includes('Fast')).value)
+  assert.deepEqual(Array.from(control(draw(), 'memoryModelEffort').options, ({ value }) => value), ['', 'low'])
+  assert.equal(control(draw(), 'memoryModelEffort').value, '')
+  props.selection = saves[0]
+  control(draw(), 'memoryModel').onChange('')
+  await submit(draw())
+  assert.equal(saves.at(-1), null)
 })
