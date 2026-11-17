@@ -4,10 +4,13 @@ import { loadClientBundle } from './client-bundle.mjs'
 
 function harness(env = {}) {
   const slots = []
+  const effects = []
   let cursor = 0
   const React = {
     Fragment: 'fragment',
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity).filter((child) => child !== null && child !== undefined && child !== false) }),
+    isValidElement: (value) => !!value && typeof value === 'object' && 'type' in value,
+    cloneElement: (element, props) => ({ ...element, props: { ...element.props, ...props } }),
     useState(initial) {
       const index = cursor++
       if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial
@@ -18,10 +21,10 @@ function harness(env = {}) {
       if (!(index in slots)) slots[index] = { current: initial }
       return slots[index]
     },
-    useEffect() {}, useCallback: (fn) => fn, useMemo: (fn) => fn(),
+    useEffect(effect) { if (env.collectEffects) effects.push(effect) }, useCallback: (fn) => fn, useMemo: (fn) => fn(),
   }
   const api = loadClientBundle({ react: React }, env).__internals
-  return { api, render(component, props) { cursor = 0; return component(props) } }
+  return { api, render(component, props) { cursor = 0; return component(props) }, flushEffects() { effects.splice(0).forEach((effect) => effect()) } }
 }
 function nodes(tree, predicate) {
   if (!tree || typeof tree !== 'object') return []
@@ -29,6 +32,75 @@ function nodes(tree, predicate) {
 }
 const t = (key) => key
 const keyEvent = (key) => ({ key, preventDefault() {}, stopPropagation() {} })
+
+test('fields associate native inputs without making a custom menu or surrounding whitespace a label activation target', () => {
+  const { api, render } = harness()
+  const native = { type: 'input', props: { ref: { current: null }, value: 'Draft' } }
+  const inputField = render(api.Field, { label: 'Native label', children: native })
+  assert.equal(inputField.type, 'div')
+  assert.equal(inputField.children[0].type, 'label')
+  assert.equal(inputField.children[0].props.htmlFor, inputField.children[1].props.id)
+  assert.equal(inputField.children[1].props.ref, native.props.ref)
+  const menuField = render(api.Field, { label: 'Menu label', children: { type: api.SelectMenu, props: {} } })
+  assert.equal(menuField.type, 'div')
+  assert.equal(nodes(menuField, (row) => row.type === 'label').length, 0)
+  assert.equal(menuField.props.onClick, undefined)
+})
+
+test('menu opening prevents parent scroll, permits scrolling its own list, and closes on real outside input', () => {
+  const docListeners = new Map(), winListeners = new Map(), focusCalls = []
+  const popup = {}
+  const { api, render, flushEffects } = harness({ collectEffects: true,
+    document: { addEventListener: (name, handler) => docListeners.set(name, handler), removeEventListener() {} },
+    window: { innerWidth: 800, innerHeight: 600, addEventListener: (name, handler) => winListeners.set(name, handler), removeEventListener() {} },
+  })
+  const props = { value: 'project', options: [{ value: 'project', label: 'Project' }], onChange() {}, ariaLabel: 'Project scope' }
+  let tree = render(api.SelectMenu, props)
+  nodes(tree, (row) => row.type === 'button')[0].props.ref.current = { getBoundingClientRect: () => ({ left: 40, top: 520, bottom: 550, width: 150 }) }
+  const option = { getAttribute: () => 'true', focus: (options) => focusCalls.push(options) }
+  tree.props.ref.current = { contains: (target) => target === popup, querySelectorAll: () => [option] }
+  nodes(tree, (row) => row.type === 'button')[0].props.onClick()
+  tree = render(api.SelectMenu, props)
+  flushEffects()
+  assert.equal(focusCalls[0].preventScroll, true)
+  assert.equal(tree.props.style.alignSelf, 'flex-start', 'the menu hit area must not stretch across the field')
+  winListeners.get('scroll')({ target: popup })
+  tree = render(api.SelectMenu, props)
+  assert.equal(nodes(tree, (row) => row.props.role === 'listbox').length, 1)
+  docListeners.get('pointerdown')({ target: {} })
+  tree = render(api.SelectMenu, props)
+  assert.equal(nodes(tree, (row) => row.props.role === 'listbox').length, 0)
+})
+
+test('rule editing exposes ownership, retains its current project, explains modes and resets replacement when the project is cleared', async () => {
+  const { api, render } = harness()
+  const saved = []
+  const entry = { id: 'agr_scope', title: 'Testing', text: 'Verify tests.', project: '/current', projectTitle: 'Current project', audience: 'worker', scenes: ['开发'] }
+  const props = { t, data: { topicId: 'topic-current', agreements: [entry], projects: [{ title: 'Example', path: '/example' }] }, onSave: async (draft) => { saved.push(draft); return undefined } }
+  let tree = render(api.AgreementsPanel, props)
+  assert.equal(nodes(tree, (row) => row.type === api.HelpDisclosure)[0].props.paragraphs.length, 5)
+  nodes(tree, (row) => row.type === 'button' && row.children.includes('rulesEdit'))[0].props.onClick()
+  tree = render(api.AgreementsPanel, props)
+  const menu = (label) => nodes(tree, (row) => row.type === api.SelectMenu && row.props.ariaLabel === label)[0]
+  assert.ok(menu('rulesProjectField').props.options.some((option) => option.value === '/current' && option.label === 'Current project'))
+  menu('topicRuleScope').props.onChange('topic')
+  tree = render(api.AgreementsPanel, props)
+  menu('rulesProjectField').props.onChange('/example')
+  tree = render(api.AgreementsPanel, props)
+  assert.ok(menu('rulesModeField').props.options.every((option) => option.description))
+  assert.equal(menu('rulesModeField').props.options[1].disabled, false)
+  menu('rulesModeField').props.onChange('replace')
+  tree = render(api.AgreementsPanel, props)
+  menu('rulesProjectField').props.onChange('')
+  tree = render(api.AgreementsPanel, props)
+  assert.equal(menu('rulesModeField').props.value, 'append')
+  assert.equal(menu('rulesModeField').props.options[1].disabled, true)
+  assert.ok(menu('rulesProjectField').props.options.some((option) => option.value === '/current'), 'clearing a project must still allow selecting the saved project again')
+  nodes(tree.props.footer, (row) => row.children.includes('rulesSave'))[0].props.onClick()
+  await Promise.resolve()
+  assert.equal(saved[0].id, entry.id)
+  assert.equal(saved[0].scope, 'topic')
+})
 
 test('new chat keeps its name and sharing choice on rejection, then creates and switches only on success', async () => {
   const { api, render } = harness()
@@ -225,6 +297,28 @@ test('the page sends the full rule draft to the server, including ownership and 
   assert.equal(submitted.scope, 'topic')
   assert.equal(submitted.audience, 'worker')
   assert.deepEqual(submitted.scenes, ['视频'])
+})
+
+test('reopening rules fetches changes made in chat instead of showing the old cached list', async () => {
+  let revision = 1, requests = 0
+  const { api, render } = harness({ fetch: async () => {
+    requests++
+    return { ok: true, json: async () => ({ ok: true, agreements: [{ id: 'agr_current', title: `Revision ${revision}`, text: 'Check tests.' }] }) }
+  } })
+  const props = { t }
+  const open = async () => {
+    const page = render(api.SuperAgentPage, props)
+    nodes(page, (row) => row.type === 'button' && row.children.includes('rules'))[0].props.onClick()
+    await new Promise((done) => setImmediate(done))
+    return nodes(render(api.SuperAgentPage, props), (row) => row.type === api.AgreementsPanel)[0]
+  }
+  let panel = await open()
+  assert.equal(panel.props.data.agreements[0].title, 'Revision 1')
+  panel.props.onClose()
+  revision = 2
+  panel = await open()
+  assert.equal(panel.props.data.agreements[0].title, 'Revision 2')
+  assert.equal(requests, 2)
 })
 
 test('narrow activity uses one detail surface and preserves back navigation after a failed task load', () => {

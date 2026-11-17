@@ -210,6 +210,33 @@ test('topic objectives keep their own schedules and are excluded from other topi
   ctx.runtime.stop()
 })
 
+test('agreement tools narrow and share the same rule while preserving all other conditions', async () => {
+  const ctx = setup()
+  const tool = ctx.aTools.get('superagent_agreement')
+  const created = await tool.execute({ action: 'save', title: 'Testing requirement', text: 'Verify relevant tests.', audience: 'worker', scenes: ['代码开发'], project: ctx.project.root, mode: 'replace', scope: 'instance' })
+  const id = created.agreement.id
+  assert.ok((await ctx.bTools.get('superagent_agreement').execute({ action: 'list' })).agreements.some((row) => row.id === id))
+  const local = await tool.execute({ action: 'save', agreement_id: id, text: created.agreement.text, scope: 'topic' })
+  assert.equal(local.agreement.id, id)
+  assert.equal(local.agreement.title, 'Testing requirement')
+  assert.equal(local.agreement.topicId, ctx.a.id)
+  assert.equal(local.agreement.audience, 'worker')
+  assert.deepEqual(local.agreement.scenes, ['代码开发'])
+  assert.equal(local.agreement.project, ctx.project.root)
+  assert.equal(local.agreement.mode, 'replace')
+  assert.equal((await ctx.bTools.get('superagent_agreement').execute({ action: 'list' })).agreements.length, 0)
+  await assert.rejects(ctx.bTools.get('superagent_agreement').execute({ action: 'save', agreement_id: id, text: 'Do not move another private rule.', scope: 'instance' }), /another topic/)
+  const shared = await tool.execute({ action: 'save', agreement_id: id, text: local.agreement.text, scope: 'instance', project: '', scenes: [] })
+  assert.equal(shared.agreement.topicId, undefined)
+  assert.equal(shared.agreement.project, '')
+  assert.equal(shared.agreement.projectTitle, undefined)
+  assert.deepEqual(shared.agreement.scenes, [])
+  assert.equal(shared.count, 1)
+  await assert.rejects(tool.execute({ action: 'save', agreement_id: id, text: shared.agreement.text, scope: 'unknown' }), /scope/)
+  assert.throws(() => ctx.runtime.saveAgreement({ id, text: shared.agreement.text, scope: 'topic' }), /open an agent chat/)
+  ctx.runtime.stop()
+})
+
 test('memory writes capture the caller message source and state writes cannot redirect to another topic', async () => {
   const ctx = setup()
   ctx.first.session.deriveMessages = () => [{ id: 'fixture-user-source', role: 'user', content: [{ type: 'text', text: 'Remember this current fact.' }] }]
