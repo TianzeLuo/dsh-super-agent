@@ -91,6 +91,35 @@ test('MarkdownText 收到 labels.code.toolbarLabels（宿主会直接读，缺�
   assert.throws(() => { const none = undefined; return none.code.copyLabel }, TypeError)
 })
 
+test('task Markdown receives the exact brief/report and complete host labels, with a content-local fallback', () => {
+  const react = recordingReact()
+  react.Component = class { constructor(props) { this.props = props } }
+  const { __internals: internals } = loadClientBundle({ react })
+  const text = '## Review\n\n- **Conserve cents**\n\n```js\nsplit(100, 3)\n```\n\n| Result | Status |\n| --- | --- |\n| 34, 33, 33 | Pass |'
+  const node = internals.taskTextOf(primitivesStub(), (key) => key, text)
+  const boundary = node.props.children
+  assert.equal(boundary.type, internals.RenderBoundary)
+  const markdown = boundary.props.children
+  assert.equal(markdown.type, 'MarkdownText')
+  assert.equal(markdown.props.text, text, 'Markdown source must not be truncated or rewritten')
+  assert.equal(markdown.props.labels.code.toolbarLabels.codeLabel, 'previewCodeLabel')
+  const mounted = new boundary.type(boundary.props)
+  mounted.state = boundary.type.getDerivedStateFromError(new Error('renderer failed'))
+  assert.equal(mounted.render().props.children, text, 'a failed host renderer must preserve readable content')
+  const next = internals.taskTextOf(primitivesStub(), (key) => key, 'Updated brief')
+  assert.notEqual(next.props.children.props.key, boundary.props.key, 'switching text must not inherit an earlier rendering failure')
+})
+
+test('missing task Markdown renderer uses React text rather than inserting raw HTML', () => {
+  const { __internals: internals } = loadClientBundle({ react: recordingReact() })
+  const text = '<img src=x onerror="alert(1)">\n## Untrusted text'
+  const fallback = internals.taskTextOf(undefined, (key) => key, text)
+  assert.equal(fallback.type, 'div')
+  assert.equal(fallback.props.children, text)
+  assert.equal(fallback.props.dangerouslySetInnerHTML, undefined)
+  assert.equal(internals.taskTextOf({}, (key) => key, undefined).props.children, '—')
+})
+
 test('CodeBlock 收到 toolbarLabels（横幅读 labels.codeLabel）', () => {
   const { __internals: internals } = loadClientBundle({ react: recordingReact() })
   const node = internals.previewBodyOf(primitivesStub(), (key) => key, {

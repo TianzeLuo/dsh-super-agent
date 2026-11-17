@@ -105,7 +105,7 @@ test('预览列复用 Drawer 的 drawer 变体，头部是标签栏、每个标�
   assert.equal(tabEls.length, 2)
   assert.equal(tabEls[0].props['aria-selected'], false)
   assert.equal(tabEls[1].props['aria-selected'], true, '活动标签高亮')
-  assert.equal(tabEls[0].props.style.background, 'transparent', '非活动标签不高亮')
+  assert.notEqual(tabEls[0].props.style.background, tabEls[1].props.style.background, '活动标签有独立底色，普通标签保留悬停反馈')
   // 每个标签都有 ✕。
   for (const tab of tabEls) {
     const close = tab.children.find((child) => child !== null && child !== undefined && child.type === 'button')

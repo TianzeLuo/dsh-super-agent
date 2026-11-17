@@ -250,6 +250,7 @@ test('Worker groups disclose chronological rounds with distinct links and stable
   assert.equal(nodes(tree, (row) => row.props.role === 'region').length, 0)
   const toggle = nodes(tree, (row) => row.props['aria-controls'])[0]
   assert.equal(toggle.props['aria-expanded'], false)
+  assert.equal(toggle.props.title, undefined, 'round disclosure must not obscure nearby actions with a native tooltip')
   toggle.props.onClick()
   tree = render(api.ActivityGroup, props)
   const region = nodes(tree, (row) => row.props.role === 'region')[0]
@@ -258,6 +259,31 @@ test('Worker groups disclose chronological rounds with distinct links and stable
   const row = nodes(region, (row) => row.type === api.ActivityRow)[0]
   render(api.ActivityRow, row.props).props.onClick()
   assert.deepEqual(selections, ['first'])
+})
+
+test('a single loaded round has no extra Worker-session footer or disclosure', () => {
+  const { api, render } = harness()
+  for (const lineage of [{}, { continuedFrom: 'older' }, { resumedFrom: 'lost' }]) {
+    const task = { id: 'only', status: 'idle', workerSessionId: 'worker', ...lineage }
+    const tree = render(api.ActivityGroup, { group: api.groupActivities([task])[0], t })
+    assert.equal(tree.children.length, 1)
+    assert.equal(tree.children[0].type, api.ActivityRow)
+  }
+})
+
+test('task details render both briefs and reports with Markdown and retain subtle previous-round navigation', () => {
+  const { api, render } = harness()
+  const selections = []
+  for (const lineage of [{ continuedFrom: 'previous' }, { resumedFrom: 'previous' }]) {
+    const task = { id: 'current', title: 'Review', status: 'idle', brief: '## Scope\n\n**Review tests.**', reports: [{ text: '- Tests passed.', reason: 'completed' }], ...lineage }
+    const tree = render(api.ActivityDetail, { task, t, onSelect: (row) => selections.push(row.id) })
+    assert.deepEqual(nodes(tree, (row) => row.type === api.TaskText).map((row) => row.props.text), [task.brief, task.reports[0].text])
+    const previous = nodes(tree, (row) => row.type === 'button' && row.children.includes('taskPrevious'))[0]
+    assert.match(previous.props.className, /sa-header-action/)
+    assert.match(previous.props.style.background, /transparent/)
+    previous.props.onClick()
+  }
+  assert.deepEqual(selections, ['previous', 'previous'])
 })
 
 test('rule editing preserves audience/scenes on rejected save and normalizes labels without broadening the rule', async () => {
@@ -328,6 +354,40 @@ test('narrow activity uses one detail surface and preserves back navigation afte
   const detail = nodes(tree, (row) => row.type === api.ActivityDetail)[0]
   assert.ok(detail)
   assert.equal(detail.props.error, 'Task unavailable')
+})
+
+test('switching instances clears task details and ignores a late response from the previous instance', async () => {
+  let finishOldRequest
+  const { api, render } = harness({ fetch: async (url) => {
+    if (String(url).includes('/ui/task?')) return new Promise((resolve) => { finishOldRequest = resolve })
+    return { ok: true, json: async () => ({ ok: true, sessionId: 'next-router', instances: [] }) }
+  } })
+  const page = () => render(api.SuperAgentPage, { t })
+  const rail = () => nodes(page(), (row) => row.type === api.ActivityRail)[0]
+  const request = rail().props.onSelect({ id: 'old-task' })
+  assert.equal(rail().props.selectedId, 'old-task')
+  nodes(page(), (row) => row.type?.name === 'InstanceSwitcher')[0].props.onSelect('another-instance')
+  await new Promise((done) => setImmediate(done))
+  assert.equal(rail().props.selectedId, '')
+  assert.equal(rail().props.detailLoading, false)
+  finishOldRequest({ ok: true, json: async () => ({ ok: true, task: { id: 'old-task', brief: 'Previous instance content' } }) })
+  await request
+  assert.equal(rail().props.detail, undefined)
+  assert.equal(rail().props.selectedId, '')
+})
+
+test('closing and reopening the same task cannot let an older request replace the refreshed detail', async () => {
+  const pending = []
+  const { api, render } = harness({ fetch: async () => new Promise((resolve) => pending.push(resolve)) })
+  const rail = () => nodes(render(api.SuperAgentPage, { t }), (row) => row.type === api.ActivityRail)[0]
+  const first = rail().props.onSelect({ id: 'same-task' })
+  rail().props.onBackDetail()
+  const second = rail().props.onSelect({ id: 'same-task' })
+  pending[1]({ ok: true, json: async () => ({ ok: true, task: { id: 'same-task', brief: 'Current revision' } }) })
+  await second
+  pending[0]({ ok: true, json: async () => ({ ok: true, task: { id: 'same-task', brief: 'Old revision' } }) })
+  await first
+  assert.equal(rail().props.detail.brief, 'Current revision')
 })
 
 test('sharing choices explain their boundaries and the select supports keyboard navigation and escape', () => {
