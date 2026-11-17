@@ -18,9 +18,13 @@ function setup(options = {}) {
   const second = fakeRouter(project.root)
   second.id = 'session-topic-b'
   second.session.header.id = second.id
+  // These tests cover routing/version/budget invariants. Semantic decisions are
+  // exercised separately, with both model-contract tests and real model calls.
+  for (const agent of [first, second]) agent.session.deriveMessages = () => [{ id: `${agent.id}-human`, role: 'user', content: 'Remember the facts I explicitly supply for this test.' }]
   topics.bind(a.id, first.id)
   topics.bind(b.id, second.id)
   const ctx = setupRuntime({ project, topics, config: { worker: { maxWorkers: options.maxWorkers ?? 4 }, schedule: { maxActive: options.maxSchedules ?? 20 } } })
+  ctx.runtime.models.complete = async (_selection, { input }) => JSON.stringify({ decision: 'apply', text: JSON.parse(input).proposal.text, reason: 'Fixture approval for the explicit human request.' })
   ctx.runtime.attachTopic(a.id, first)
   ctx.runtime.attachTopic(b.id, second)
   const aScope = { topicId: a.id, agent: first }

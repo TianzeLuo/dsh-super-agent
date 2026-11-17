@@ -104,3 +104,29 @@ test('context preview exposes complete selected facts and a real required-overfl
   assert.ok(nodes(tree, (node) => node.props.role === 'alert').some((node) => node.children.includes('memoryOverflow')))
   assert.ok(nodes(tree, (node) => node.type === 'p').some((node) => node.children.includes(text)))
 })
+
+test('memory organization controls send exact scope and show failures without discarding the editor', async () => {
+  const { api, render } = harness(), calls = []
+  const props = { t, topicId: 'a', topics: [{ id: 'a', name: 'Fixture', state: {} }], memory: { topic: [], instance: [], review: { auto: true, topic: { outcome: 'error', available: true, reason: 'Model unavailable; previous memory retained.' } } }, onAction: async (body) => { calls.push(body); return false } }
+  let tree = render(api.TopicsPanel, props)
+  nodes(tree, (node) => node.props.role === 'tab' && node.children.includes('memoryTabFacts'))[0].props.onClick()
+  tree = render(api.TopicsPanel, props)
+  assert.ok(nodes(tree, (node) => node.props.role === 'status').length)
+  await nodes(tree, (node) => node.type === 'button' && node.children.includes('memoryOrganize'))[0].props.onClick()
+  await nodes(tree, (node) => node.props.role === 'switch')[0].props.onClick()
+  assert.deepEqual(calls, [{ action: 'memory_review', scope: 'topic', run: true }, { action: 'memory_review', auto: false }])
+})
+
+test('manual organization announces work immediately, before the server returns its result', async () => {
+  const { api, render } = harness()
+  let release
+  const props = { t, topicId: 'a', topics: [{ id: 'a', name: 'Fixture', state: {} }], memory: { topic: [], review: { topic: { available: true } } }, onAction: () => new Promise((resolve) => { release = resolve }) }
+  let tree = render(api.TopicsPanel, props)
+  nodes(tree, (node) => node.props.role === 'tab' && node.children.includes('memoryTabFacts'))[0].props.onClick()
+  tree = render(api.TopicsPanel, props)
+  const pending = nodes(tree, (node) => node.type === 'button' && node.children.includes('memoryOrganize'))[0].props.onClick()
+  tree = render(api.TopicsPanel, props)
+  assert.equal(nodes(tree, (node) => node.type === 'button' && node.children.includes('memoryOrganizing'))[0].props.disabled, true)
+  assert.ok(nodes(tree, (node) => node.props.role === 'status').some((node) => node.children.includes('memoryOrganizing')))
+  release(true); await pending
+})

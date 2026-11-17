@@ -51,7 +51,8 @@ AI 在对话有实质进展时维护；开始聊天前无需填写，也可展�
 每个实例最多 32 个主题（含总览），名称最多 60 字符。每个记忆作用域最多 128 条有效
 记录，新正文最多 1200 字符；达到容量后归档过时事实可释放有效名额。修改同一事实时
 沿用稳定名称并提交所读版本，冲突须重读；同名本地事实只在本主题覆盖共享事实。
-默认读取和注入排除归档项。每条保留最近五次旧版本，不自动合并不同名称的语义重复。
+默认读取和注入排除归档项。每条保留最近五次旧版本；模型整理可以合并语义重复，归档
+过时自动记录，保留事实的限定条件。
 旧版最多 4000 字符的文本原样迁移，不按换行拆分，首次写入新格式时保留原始备份。
 
 `context.maxChars` 默认 12000（可设 1000–64000），统一约束约定、记忆、主题进展及其
@@ -59,11 +60,20 @@ AI 在对话有实质进展时维护；开始聊天前无需填写，也可展�
 同级按当前请求／主题的关键词相关性和更新时间排序，最多选择五个其他主题进展。
 每条完整装入，放不下就省略并提示；重点遗漏会额外警告。界面可查看实际选中项、
 省略项及原因。该字符预算不包括宿主提示词、聊天、工具结果，也不等同于 token 上限。
-不额外运行模型压缩；用更新／归档维持有效事实，详细内容按需读取。
+注入仍只选择完整条目；存储侧另由模型提炼、合并与压缩，详细内容按需读取。
+
+在 **管理与记忆 → 记忆** 可查看本实例的自动整理开关、最近结果与保存依据，或点击
+**整理记忆**。自动整理默认等相关对话和任务空闲 15 分钟，只处理原分身或原群的材料，
+不会自动发布到实例共享记忆。人工保存和明确要求记住的记录不由后台改写；直接聊天
+纠正，或主动整理，才会检查这些内容。主动整理也可仅处理已保存内容，无需创建聊天。
+没有有用变化时不改条目版本。模型调用沿用实例 Worker 模型选择，不创建执行会话。
 
 `superagent_memory` 支持 `read/save/archive/restore/state`。读取默认只含当前有效版本，
 可按 `scope/query/id` 查询，用 `after` 翻页，显式请求归档或最近修订；默认每次 6000、
 最多 8000 个序列化字符，只返回完整条目。写入已有条目须传 `expected_revision`。
+模型提出保存、纠正、归档或恢复时，另一次无工具模型调用根据当前真实用户消息核对
+意图并精炼内容；返回 `deferred` 表示没有持久化，不能向用户声称已记住。面板手动编辑
+直接保存。宿主缺少模型接口时保留手动编辑，模型整理与意图核对会明确报告不可用。
 原文召回使用 `superagent_history`，每回合最多 2 次、合计 6000 个序列化字符，默认
 每次 3000；最多返回 8 条消息，每条正文最多 1200 字符。默认看最近 100 条可见消息，
 关键词只搜索该窗口；可用返回的消息 ID 向前翻页。没有全文索引或向量数据库。
@@ -480,7 +490,7 @@ node bin/super-agent.mjs config
 | GET | `/api/super-agent/outbox?channel=im&since=…` | 读待发送的人类消息 |
 | GET | `/api/super-agent/ui/state` | 面板状态、项目、任务、workspace sessions |
 | POST | `/api/super-agent/ui/ensure` | 确保总览或主题；可传 `instance_id`、`topic_id`，兼容旧 `cwd` |
-| GET/POST | `/api/super-agent/ui/topics` | 查看、创建、修改或隐藏／恢复主题；编辑共享记录 |
+| GET/POST | `/api/super-agent/ui/topics` | 管理主题与事实、主动整理、开关本实例自动整理 |
 | POST | `/api/super-agent/ui/topics/ensure` | 创建／恢复已登记主题的宿主会话；必传 `instance_id`、`topic_id` |
 | POST | `/api/super-agent/ui/focus` | 兼容旧脚本的 focus 设置 |
 | POST | `/api/super-agent/ui/reset` | 仅总览可用：中止并归档本实例 Worker、取消定时任务、切换 generation、创建新总览 |
@@ -493,6 +503,11 @@ node bin/super-agent.mjs config
 | GET/POST | `/api/super-agent/ui/schedules` | 读/建定时唤醒 |
 | POST | `/api/super-agent/ui/schedules/run` | 立即执行一次某条定时任务 |
 | POST | `/api/super-agent/ui/schedules/cancel` | 取消某条定时任务 |
+
+主动整理向主题接口提交 `action: "memory_review"`、`scope: "topic" | "instance"`、
+`run: true`；开关提交同一 action 与 `auto: true | false`。携带 `instance_id/topic_id`
+定位实例和分身。群整理向协作接口提交同一 action、`group_id` 与 `run: true`。
+这些是操作者界面入口，不向模型开放范围或权限配置。
 
 ## 配置文件
 
@@ -613,6 +628,9 @@ node bin/super-agent.mjs config
   窗口（默认 10000ms）；下一次 watchdog 检查仍查不到才落 lost，期间恢复则撤销。
 - `agreements.fileName`：相对项目根 `.dsh/` 的文件名；一般不用改。
 - `context.maxChars`：受管理主题持久上下文的字符预算，默认 12000；不含宿主聊天与工具输出。
+- `memory.enabled`：是否启用空闲自动整理，默认 true；各实例可在记忆页单独关闭。
+- `memory.idleMs`：相关对话与任务结束后的整理等待，默认 900000，最低 1000 毫秒；
+  活跃期间合并等待，新输入和并发编辑使旧整理结果失效，失败不会按同一材料反复重试。
 - `schedule.maxActive`：活跃定时任务上限；`timeZone` 是未传时区时的默认 IANA
   时区，空表示用宿主本地时区。
 - `voice.maxWords`：`superagent_tell` 的短回复上限；`expandWhenAsked` 允许用户

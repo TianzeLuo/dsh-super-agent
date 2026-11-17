@@ -265,6 +265,12 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
 
 async function topicRig(home = mkdtempSync(join(tmpdir(), 'dsh-super-agent-topic-host-')), persisted = new Map()) {
   const sys = fakeCordis()
+  sys.scoped.agentDefaultModel = { currentSelection: () => ({ provider: 'fixture', model: 'memory' }) }
+  sys.scoped.llm = { async *stream(options) {
+    const input = JSON.parse(options.messages[0].content[0].text)
+    yield { type: 'text-delta', text: JSON.stringify(input.proposal ? { decision: 'apply', text: input.proposal.text, reason: 'Fixture intent decision.' } : { operations: [], reason: 'Fixture no-op.' }) }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  } }
   let created = 0
   const activate = async (id) => {
     if (sys.agents.has(id)) return sys.agents.get(id)
@@ -320,6 +326,7 @@ test('topics keep native histories but share one owner; concurrent ensures and i
   const topicAgent = rig.sys.agents.get(first.sessionId)
   assert.equal(topicAgent.tools.size, 16)
   assert.match(topicAgent.sections.map((row) => row.text).join('\n'), /### Durable facts and topic progress/)
+  topicAgent.ctx.emit('agent/pre-step', { agent: topicAgent, messages: [{ id: 'fixture-human', role: 'user', content: 'Remember my local fixture.' }] }, () => undefined)
   await topicAgent.tools.get('superagent_memory').execute({ action: 'remember', text: 'LOCAL-ONLY fixture' }, {})
   await rig.request('topics', { action: 'shared_notes', instance_id: 'default', notes: 'COMMON fixture' })
   const [viewA, viewB] = await Promise.all([
@@ -351,7 +358,7 @@ test('topics keep native histories but share one owner; concurrent ensures and i
   const renderReader = () => readerAgent.contexts.find((row) => row.name === 'super-agent:router-state').text()
   const assembled = renderReader()
   assert.ok(assembled.indexOf('ordinary\n') < assembled.indexOf(`Topic ${a.id}`), 'unrelated state initially follows ordinary facts')
-  readerAgent.ctx.emit('agent/pre-step', { agent: readerAgent, messages: [{ id: 'claimed-state-query', source: { kind: 'user' }, content: [{ type: 'text', text: 'Hydrology current safety blocker' }] }, { id: 'generated-snapshot', source: { kind: 'time-context' }, content: [{ type: 'text', text: 'Current time.' }] }] }, () => undefined)
+  readerAgent.ctx.emit('agent/pre-step', { agent: readerAgent, messages: [{ id: 'claimed-state-query', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'Hydrology current safety blocker' }] }, { id: 'generated-snapshot', role: 'user', source: { kind: 'time-context' }, content: [{ type: 'text', text: 'Current time.' }] }] }, () => undefined)
   const admitted = renderReader()
   assert.ok(admitted.indexOf(`Topic ${a.id}`) < admitted.indexOf('ordinary\n'), 'admission refresh promotes the state relevant to the current claimed input')
   const refreshedSource = await readerAgent.tools.get('superagent_memory').execute({ action: 'save', key: 'claimed.source', text: 'Human request remains the source.' }, {})
@@ -372,6 +379,7 @@ test('topics keep native histories but share one owner; concurrent ensures and i
   const retained = await rig.request('topics/ensure', { instance_id: 'default', topic_id: a.id })
   assert.equal(retained.sessionId, first.sessionId, 'reset preserves native topic history')
   assert.equal(retained.dataDir, resetMain.dataDir, 'live topic tools rebind to the new shared runtime')
+  topicAgent.ctx.emit('agent/pre-step', { agent: topicAgent, messages: [{ id: 'post-reset-human', role: 'user', content: 'Remember the post-reset fixture.' }] }, () => undefined)
   await topicAgent.tools.get('superagent_memory').execute({ action: 'remember', text: 'POST-RESET fixture' }, {})
   const resetState = await rig.request('state', undefined, { instance_id: 'default', topic_id: a.id })
   assert.match(resetState.topics.find((row) => row.id === a.id).notes, /LOCAL-ONLY fixture[\s\S]*POST-RESET fixture/)

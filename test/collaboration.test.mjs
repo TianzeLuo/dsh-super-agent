@@ -51,6 +51,24 @@ function setup(options = {}) {
 }
 const request = (ctx, extra = {}) => ctx.operator(() => ctx.board.delegate({ to_topic_id: ctx.a.id, title: 'Research stage', brief: 'Check the approved facts. Do not publish externally.', idempotency_key: 'stage-one', ...extra }))
 
+test('group organization receives only group evidence and cannot publish into topic or instance memory', async () => {
+  const ctx = setup()
+  const group = ctx.operator(() => ctx.board.createGroup({ name: 'Scoped review', members: [ctx.a.id, ctx.b.id], coordinator_id: ctx.a.id }))
+  ctx.operator(() => ctx.runtime.topicMemory({ action: 'save', key: 'private-marker', text: 'PRIVATE-ORGANIZATION-CANARY', scope: 'topic' }))
+  const saved = ctx.operator(() => ctx.board.memory({ group_id: group.id, action: 'save', key: 'review.gate', text: 'Do not publish before approval. Do not publish before approval.' }))
+  ctx.runtime.models.complete = async (_selection, { input }) => {
+    assert.doesNotMatch(input, /PRIVATE-ORGANIZATION-CANARY|PRIVATE-TRANSCRIPT-CANARY/)
+    assert.equal(JSON.parse(input).scope, `group:${group.id}`)
+    return JSON.stringify({ operations: [{ action: 'save', id: saved.entry.id, text: 'Do not publish before approval.', evidence: [`memory:${saved.entry.id}`], reason: 'Remove repetition, preserving the restriction.' }], reason: 'Consolidated the group record.' })
+  }
+  await ctx.runtime.memoryReview.organize(`group:${group.id}`, { manual: true })
+  assert.equal(ctx.operator(() => ctx.board.group(group.id)).memory[0].revision, 2)
+  assert.equal(ctx.topics.sharedMemory.length, 0)
+  assert.equal(ctx.topics.get(ctx.a.id).memory.length, 0)
+  assert.equal(ctx.topics.get('main').memory[0].text, 'PRIVATE-ORGANIZATION-CANARY')
+  ctx.runtime.stop()
+})
+
 test('collaboration Worker rule routing preserves private ownership and explicit scenes', () => {
   const ctx = setup()
   ctx.operator(() => {
