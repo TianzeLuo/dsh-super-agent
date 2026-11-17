@@ -88,6 +88,62 @@ test('new facts require fresh human evidence, not an assistant assertion or old 
   for (const id of ['u1', 'a1']) assert.throws(() => applyMemoryOperations([], { operations: [{ action: 'save', key: 'verified', text: 'Everything is verified.', evidence: [id], reason: 'Unjustified assertion.' }] }, evidence, {}, 30), /new human evidence/)
 })
 
+test('one repair receives the validator error and original evidence, then commits the grounded plan', async () => {
+  const saved = { action: 'save', key: 'release.check', text: 'Verify releases on Linux.', evidence: ['u1'], reason: 'The user stated a lasting release requirement.' }
+  const rejected = { ...saved, text: 'Unverified draft.', evidence: ['a1'] }
+  let input
+  const f = fixture({ messages: [message('u1', 'For future releases, verify on Linux.'), message('a1', 'I will verify the current run.', 'assistant')],
+    generate: (request, data) => {
+      if (data.calls.length === 1) {
+        input = request.input
+        return JSON.stringify({ operations: [rejected] })
+      }
+      assert.equal(request.input, input)
+      assert.match(request.system, /New memory requires new human evidence/)
+      assert.doesNotMatch(request.system, /Unverified draft/)
+      assert.deepEqual(data.entries, [])
+      assert.deepEqual(data.review, {})
+      return { text: JSON.stringify({ operations: [saved], reason: 'Kept the release requirement.' }), provider: 'qoder', model: 'dfmodel' }
+    },
+  })
+  const result = await f.manager.organize('topic:a')
+  assert.equal(f.data.calls.length, 2)
+  assert.equal(result.review.cursor, 'a1')
+  assert.equal(result.review.outcome, 'updated')
+  assert.equal(result.review.model, 'qoder/dfmodel')
+  assert.deepEqual(f.data.entries.map((entry) => [entry.key, entry.text, entry.source.evidence]), [[saved.key, saved.text, ['u1']]])
+})
+
+test('an invalid repair preserves all entries and the last successful cursor and stops after two calls', async () => {
+  const old = fact('release.policy', 'Run the original checks.')
+  const invalid = { action: 'save', key: 'unverified', text: 'Unverified assertion.', evidence: ['a1'], reason: 'No human evidence.' }
+  const f = fixture({ entries: [old], messages: [message('u1', 'Original policy.'), message('u2', 'Update the existing policy.'), message('a1', 'Everything is verified.', 'assistant')],
+    generate: () => JSON.stringify({ operations: [operation(old, 'Run the new checks.'), invalid] }),
+  })
+  f.data.review = { cursor: 'u1', outcome: 'unchanged' }
+  await assert.rejects(f.manager.organize('topic:a'), /new human evidence/)
+  assert.equal(f.data.calls.length, 2)
+  assert.deepEqual(f.data.entries, [old])
+  assert.equal(f.data.review.cursor, 'u1')
+  assert.equal(f.data.review.attempted, 'a1')
+  assert.equal(f.data.review.outcome, 'error')
+  assert.match(f.data.review.reason, /new human evidence/)
+})
+
+test('changed input aborts validation or repair without committing an outdated plan', async () => {
+  for (const changeOnCall of [1, 2]) {
+    const f = fixture({ generate: (_request, data) => {
+      if (data.calls.length === changeOnCall) data.messages.push(message('u2', 'A later correction.'))
+      return data.calls.length === 1 ? 'invalid JSON' : JSON.stringify({ operations: [], reason: 'No useful change.' })
+    } })
+    await assert.rejects(f.manager.organize('topic:a'), /inputs changed/)
+    assert.equal(f.data.calls.length, changeOnCall)
+    assert.deepEqual(f.data.entries, [])
+    assert.equal(f.data.review.cursor, undefined)
+    assert.equal(f.data.review.attempted, 'u1')
+  }
+})
+
 test('manual reconsideration accepts older human evidence and canonicalizes only visible memory references', () => {
   const entry = fact('existing', 'A durable fact.', 'operator')
   const evidence = memoryEvidence([message('u1', 'A confirmed lasting default.')], 'u1')
