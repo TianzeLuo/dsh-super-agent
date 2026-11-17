@@ -241,6 +241,19 @@ test('agreement tools narrow and share the same rule while preserving all other 
   ctx.runtime.stop()
 })
 
+test('overview tools advertise only supported rule scopes while agent chats retain local rules', async () => {
+  const ctx = setup()
+  const overview = new Map(createTools(ctx.runtime).map((definition) => [definition.name, definition])).get('superagent_agreement')
+  assert.deepEqual(overview.parameters.properties.scope.enum, ['instance'])
+  assert.deepEqual(ctx.aTools.get('superagent_agreement').parameters.properties.scope.enum, ['topic', 'instance'])
+  await assert.rejects(overview.execute({ action: 'save', scope: 'topic', text: 'Do not silently widen this scope.' }), /open an agent chat/)
+  assert.equal(ctx.runtime.listAgreements().length, 0)
+  const saved = await overview.execute({ action: 'save', scope: 'instance', text: 'Project-specific acceptance requirement.', project: ctx.project.root })
+  assert.equal(saved.agreement.topicId, undefined)
+  assert.equal(saved.agreement.project, ctx.project.root)
+  ctx.runtime.stop()
+})
+
 test('memory writes capture the caller message source and state writes cannot redirect to another topic', async () => {
   const ctx = setup()
   ctx.first.session.deriveMessages = () => [{ id: 'fixture-user-source', role: 'user', content: [{ type: 'text', text: 'Remember this current fact.' }] }]

@@ -205,3 +205,24 @@ test('foreground checking redacts recognized secrets in both the proposal and th
   const result = await f.manager.write('topic:a', { action: 'save', key: 'credential', text: secret }, { id: 'u2', role: 'user', text: `Remember ${secret}.` }, () => { throw new Error('must not commit') })
   assert.equal(result.deferred, true)
 })
+
+test('correction generation uses canonical memory and human evidence without a rewritten draft', async () => {
+  const entry = fact('project.runtime', 'Run the local service in WSL. No public release this round.', 'explicit')
+  const f = fixture({ entries: [entry], generate: ({ input }) => {
+    const request = JSON.parse(input)
+    assert.equal(request.existing.text, entry.text)
+    assert.equal(request.proposal.text, undefined)
+    assert.match(request.human.text, /Windows/)
+    assert.doesNotMatch(input, /UNREQUESTED_BAN/)
+    return JSON.stringify({ decision: 'apply', text: 'Run locally in Windows Node; use WSL for compatibility checks. No public release this round.', reason: 'Only the runtime changed; the public-release boundary is retained.' })
+  } })
+  let committed
+  const result = await f.manager.write('topic:a', { action: 'save', id: entry.id, key: entry.key, expected_revision: 1,
+    text: 'Windows Node. UNREQUESTED_BAN: never launch or deploy any local service.' },
+  { id: 'u2', role: 'user', text: 'Change the default to Windows Node; keep WSL for compatibility checks and preserve the public-release boundary.' },
+  (input, source) => { committed = changeMemory(f.data.entries, input, source, 40); return committed })
+  assert.equal(result.entry.id, entry.id)
+  assert.equal(result.entry.revision, 2)
+  assert.match(committed.entry.text, /No public release/)
+  assert.doesNotMatch(committed.entry.text, /never launch|UNREQUESTED_BAN/)
+})
