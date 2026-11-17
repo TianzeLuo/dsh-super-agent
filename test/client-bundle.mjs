@@ -68,7 +68,7 @@ export function loadClientBundle(modules = {}, env = {}) {
     class { observe() {} disconnect() {} },
     () => 0,
     () => {},
-    async () => { throw new Error('client bundle must not fetch during load') },
+    env.fetch ?? (async () => { throw new Error('client bundle must not fetch during load') }),
     globalThis.AbortController,
   )
   const exports = registration.factory(requireStub)

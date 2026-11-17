@@ -322,6 +322,25 @@ session/event turn/end
 
 `turn/end` 去重键是 `(taskId, turn)`；同 turn 的重复事件不会生成两条报告。
 
+### 任务轮次、规则与会话连续性
+
+继续使用原 Worker 仍创建独立任务，`continuedFrom` 表示同会话沿用；恢复到新会话使用
+`resumedFrom`。Router 根据交付物、上下文、并行和模型要求决定，不新增工作绑定器、
+父子 Router 或固定续用策略。活动列表只对已授权、已加载的任务按实际会话 ID 归组，
+分页与权限仍按任务计算，界面归组不扩大数据可见性。
+
+规则新增 `audience` 与 `scenes`，旧条目为双方适用且不限场景。顺序为原有所有权过滤、
+对象／场景筛选、适用项目的追加或替换，再按现有预算选择完整条目。Router 保留自身
+条件规则；Worker 规则正文按需列出，任务声明显式场景后由 runtime 筛选。场景不是权限。
+
+Router 动态上下文携带当前可见规则目录的短摘要版本及最多 24 个场景标签。正文、对象、
+场景或启用状态变化都会改变版本，预设要求在版本变化后重读再派工、补指令或验收。
+这是为解决只更新 Worker 注入而 Router 仍用旧工具结果验收的问题，不是全量复制执行规则。
+
+新建、沿用、线程直通及 steer 都读取当前规则和事实；任务场景持久化，沿用时省略继承、
+空数组清空。场景或注入改变不删除旧聊天，因此仍需模型遵守当前选择；要求遗漏时依原有
+预算提示补读或报告阻塞。协作 Worker 继承原有群／请求边界，私人记忆与私人规则仍被排除。
+
 ### 为什么 Worker 不拿 Router 工具
 
 Worker 是 `subagent-spawn` 起的独立 Agent，工具集由它自己的 preset 决定。
@@ -710,6 +729,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 活动 | `test/activity.test.mjs` | 进行中优先、同时间戳 tie-break、游标分批、总数 |
 | 模型 | `test/models.test.mjs` | 目录展开、allowlist、默认集合、`onlyProvider`/`onlyNames`、默认选择、effort 校验、空匹配警告 |
 | 约定 | `test/agreements.test.mjs` | 全局/项目、append/replace、损坏文件、上限、注入文本 |
+| 规则路由与续用 | `test/rule-routing.test.mjs` | 旧条目兼容、对象与场景、目录版本失效、项目替换顺序、续接与 steer 刷新、失败不写入、预算、停用与场景清空、当前会话候选 |
 | 功能 | `test/features.test.mjs` | 模型派工、复用冲突、跨项目模型、约定注入、任务详情/活动、定时桥 |
 | 目标 | `test/objectives.test.mjs` | 创建不唤醒、cadence→schedule、Worker 报告推进、到点检查推进、关闭取消调度、节奏替换、宿主 goal 迁移、journal 回放 |
 | 宿主 goal | `test/host-goals.test.mjs` | restrict 名单、guard 拒绝/放行、pre-execute 兜底、armed 即 disarm、resume 再 disarm、dispose 释放 |
@@ -726,7 +746,7 @@ Windows 的路径比较不区分大小写，盘符根、Windows/Program Files/Pr
 | 浏览器 | `test/client.test.mjs` | 单文件 loader、id、依赖边界、侧栏/面板/子槽注册、无项目选择器、活动栏/重置/Worker 隐藏契约、实例切换/未读接线 |
 | CLI | `test/cli.test.mjs` | init/enable/emit/status/recall/outbox |
 
-共 366 个用例，全部不需要模型调用。
+共 507 个用例，全部不需要模型调用；依赖本机条件的用例在条件缺失时跳过。
 
 
 ## 17. 端到端验证记录

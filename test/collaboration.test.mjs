@@ -51,6 +51,25 @@ function setup(options = {}) {
 }
 const request = (ctx, extra = {}) => ctx.operator(() => ctx.board.delegate({ to_topic_id: ctx.a.id, title: 'Research stage', brief: 'Check the approved facts. Do not publish externally.', idempotency_key: 'stage-one', ...extra }))
 
+test('collaboration Worker rule routing preserves private ownership and explicit scenes', () => {
+  const ctx = setup()
+  ctx.operator(() => {
+    ctx.runtime.saveAgreement({ text: 'ROUTER_AUDIENCE_ONLY', audience: 'router' })
+    ctx.runtime.saveAgreement({ text: 'VIDEO_WORKER_SCOPE', audience: 'worker', scenes: ['视频'] })
+    ctx.runtime.saveAgreement({ text: 'CODE_WORKER_SCOPE', audience: 'worker', scenes: ['开发'] })
+  })
+  ctx.personal(ctx.a.id, () => ctx.runtime.saveAgreement({ text: 'PRIVATE_TOPIC_RULE', audience: 'worker' }))
+  const r = request(ctx)
+  const context = ctx.board.contextFor(ctx.a.id, { requestId: r.id })
+  const plan = ctx.board.contextPlan(context.id, ctx.operator(() => ctx.runtime.listAgreements()), { worker: true, projectPath: ctx.root, scenes: ['视频'] })
+  assert.match(plan.text, /VIDEO_WORKER_SCOPE/)
+  assert.doesNotMatch(plan.text, /ROUTER_AUDIENCE_ONLY|CODE_WORKER_SCOPE|PRIVATE_TOPIC_RULE|Use superagent_collaborate/)
+  const routerPlan = ctx.board.contextPlan(context.id, ctx.operator(() => ctx.runtime.listAgreements()))
+  assert.match(routerPlan.text, /ROUTER_AUDIENCE_ONLY/)
+  assert.doesNotMatch(routerPlan.text, /VIDEO_WORKER_SCOPE|PRIVATE_TOPIC_RULE/)
+  ctx.runtime.stop()
+})
+
 test('existing instances stay opted out and only the operator changes roles and primary selection', () => {
   const project = fakeProject()
   const topics = new TopicRegistry(project.root)

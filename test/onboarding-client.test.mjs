@@ -121,7 +121,7 @@ test('recent activity shows six rows and reveals cached pages after collapse wit
   let requests = 0
   const props = { t, tasks, total: tasks.length, scope: 'instance', onLoadMore: () => { requests++; throw new Error('cached rows must not be fetched again') } }
   let tree
-  const shown = () => nodes(tree, (node) => node.props.task?.id?.startsWith('fixture-')).length
+  const shown = () => nodes(tree, (node) => node.type === api.ActivityGroup).reduce((count, node) => count + node.props.group.tasks.length, 0)
   const more = () => nodes(tree, (node) => node.props.className === 'sa-more-button')[0]
   const toggle = () => nodes(tree, (node) => node.props.className === 'sa-activity-collapse')[0]
   tree = render(api.ActivityRail, props)
@@ -144,6 +144,96 @@ test('recent activity shows six rows and reveals cached pages after collapse wit
   tree = render(api.ActivityRail, props)
   assert.equal(shown(), 12)
   assert.equal(requests, 0)
+})
+
+test('activity grouping tracks actual sessions and retains the active round while separating a fresh recovery', () => {
+  const { api } = harness()
+  const groups = api.groupActivities([
+    { id: 'closed-latest', workerSessionId: 'one', status: 'closed', createdAt: 1, updatedAt: 40 },
+    { id: 'active', workerSessionId: 'one', continuedFrom: 'closed-latest', status: 'working', createdAt: 2, updatedAt: 30 },
+    { id: 'fresh', workerSessionId: 'two', resumedFrom: 'closed-latest', status: 'idle', createdAt: 3 },
+    { id: 'pending', status: 'queued', createdAt: 4 },
+  ])
+  assert.equal(groups.length, 3)
+  assert.equal(groups[0].current.id, 'active')
+  assert.deepEqual(groups[0].tasks.map((row) => row.id), ['closed-latest', 'active'])
+  assert.equal(groups[1].current.id, 'fresh')
+  assert.notEqual(groups[0].key, groups[1].key)
+  const finished = api.groupActivities([
+    { id: 'old-closed-late', workerSessionId: 'one', status: 'closed', createdAt: 1, updatedAt: 40 },
+    { id: 'latest-delivery', workerSessionId: 'one', status: 'idle', createdAt: 2, updatedAt: 30 },
+  ])
+  assert.equal(finished[0].current.id, 'latest-delivery', 'closing an old round must not replace the latest delivery on its collapsed card')
+})
+
+test('Worker groups disclose chronological rounds with distinct links and stable accessibility targets', () => {
+  const { api, render } = harness()
+  const selections = []
+  const group = api.groupActivities([
+    { id: 'second', workerSessionId: 'one', status: 'working', createdAt: 20 },
+    { id: 'first', workerSessionId: 'one', status: 'idle', createdAt: 10 },
+  ])[0]
+  const props = { group, t, onSelect: (task) => selections.push(task.id) }
+  let tree = render(api.ActivityGroup, props)
+  assert.equal(nodes(tree, (row) => row.props.role === 'region').length, 0)
+  const toggle = nodes(tree, (row) => row.props['aria-controls'])[0]
+  assert.equal(toggle.props['aria-expanded'], false)
+  toggle.props.onClick()
+  tree = render(api.ActivityGroup, props)
+  const region = nodes(tree, (row) => row.props.role === 'region')[0]
+  assert.equal(region.props.id, toggle.props['aria-controls'])
+  assert.deepEqual(nodes(region, (row) => row.type === api.ActivityRow).map((row) => row.props.task.id), ['first', 'second'])
+  const row = nodes(region, (row) => row.type === api.ActivityRow)[0]
+  render(api.ActivityRow, row.props).props.onClick()
+  assert.deepEqual(selections, ['first'])
+})
+
+test('rule editing preserves audience/scenes on rejected save and normalizes labels without broadening the rule', async () => {
+  const { api, render } = harness()
+  const calls = []
+  const entry = { id: 'agr_fixture', title: 'Narration rule', text: 'Keep source evidence.', project: '', audience: 'worker', scenes: ['video'], enabled: true }
+  const props = { t, data: { agreements: [entry], projects: [] }, onSave: async (draft) => { calls.push(draft); return undefined } }
+  let tree = render(api.AgreementsPanel, props)
+  nodes(tree, (row) => row.type === 'button' && row.children.includes('rulesEdit'))[0].props.onClick()
+  tree = render(api.AgreementsPanel, props)
+  assert.equal(nodes(tree, (row) => row.type === api.SelectMenu && row.props.ariaLabel === 'rulesAudience')[0].props.value, 'worker')
+  nodes(tree, (row) => row.props['aria-label'] === 'rulesScenes')[0].props.onChange({ target: { value: 'Video, 口播, video' } })
+  tree = render(api.AgreementsPanel, props)
+  nodes(tree.props.footer, (row) => row.children.includes('rulesSave'))[0].props.onClick()
+  await Promise.resolve()
+  assert.deepEqual(calls[0].scenes, ['video', '口播'])
+  assert.equal(calls[0].audience, 'worker')
+  tree = render(api.AgreementsPanel, props)
+  assert.equal(nodes(tree, (row) => row.props['aria-label'] === 'rulesScenes')[0].props.value, 'Video, 口播, video')
+})
+
+test('the page sends the full rule draft to the server, including ownership and routing conditions', async () => {
+  const requests = []
+  const { api, render } = harness({ fetch: async (url, options) => {
+    requests.push({ url, options })
+    return { ok: true, json: async () => ({ ok: true, agreements: [] }) }
+  } })
+  const props = { t }
+  let tree = render(api.SuperAgentPage, props)
+  nodes(tree, (row) => row.type === 'button' && row.children.includes('rules'))[0].props.onClick()
+  await Promise.resolve()
+  tree = render(api.SuperAgentPage, props)
+  const panel = nodes(tree, (row) => row.type === api.AgreementsPanel)[0]
+  assert.ok(panel)
+  await panel.props.onSave({ title: 'Topic video rule', text: 'Retain sources.', scope: 'topic', audience: 'worker', scenes: ['视频'], enabled: true, mode: 'append', project: '' })
+  const submitted = JSON.parse(requests.findLast((entry) => entry.options?.method === 'POST').options.body)
+  assert.equal(submitted.scope, 'topic')
+  assert.equal(submitted.audience, 'worker')
+  assert.deepEqual(submitted.scenes, ['视频'])
+})
+
+test('narrow activity uses one detail surface and preserves back navigation after a failed task load', () => {
+  const { api, render } = harness()
+  const tree = render(api.ActivityRail, { t, tasks: [{ id: 'one', status: 'idle' }], total: 1, embedded: true, selectedId: 'missing', detailError: 'Task unavailable' })
+  assert.equal(nodes(tree, (row) => row.type === 'aside')[0].props.style.display, 'none')
+  const detail = nodes(tree, (row) => row.type === api.ActivityDetail)[0]
+  assert.ok(detail)
+  assert.equal(detail.props.error, 'Task unavailable')
 })
 
 test('sharing choices explain their boundaries and the select supports keyboard navigation and escape', () => {
