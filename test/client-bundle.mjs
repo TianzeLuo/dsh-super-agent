@@ -66,8 +66,8 @@ export function loadClientBundle(modules = {}, env = {}) {
     locationStub,
     env.document ?? { querySelectorAll: () => [], body: {} },
     class { observe() {} disconnect() {} },
-    () => 0,
-    () => {},
+    env.setInterval ?? (() => 0),
+    env.clearInterval ?? (() => {}),
     env.fetch ?? (async () => { throw new Error('client bundle must not fetch during load') }),
     globalThis.AbortController,
   )

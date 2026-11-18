@@ -315,6 +315,9 @@ test('task details show a Worker report independently from its current or stale 
   tree = render(api.ActivityDetail, { task: { ...task, acceptance: { ...task.acceptance, outcome: 'pass', state: 'stale' } }, t })
   assert.equal(nodes(tree, (row) => row.children.includes('taskAcceptanceStale')).length, 1)
   assert.equal(nodes(tree, (row) => row.children.includes('taskAcceptancePass')).length, 0)
+  tree = render(api.ActivityDetail, { task: { ...task, acceptance: { ...task.acceptance, outcome: 'pass' } }, error: 'Read timed out', t })
+  assert.equal(nodes(tree, (row) => row.children.includes('taskAcceptanceUnavailable')).length, 1)
+  assert.equal(nodes(tree, (row) => row.children.includes('taskAcceptancePass')).length, 0)
 })
 
 test('memory settings show the idle wait alongside the last organization result', () => {
@@ -429,6 +432,75 @@ test('closing and reopening the same task cannot let an older request replace th
   pending[0]({ ok: true, json: async () => ({ ok: true, task: { id: 'same-task', brief: 'Old revision' } }) })
   await first
   assert.equal(rail().props.detail.brief, 'Current revision')
+})
+
+test('panel ticks refresh an open task and memory drawer, report failed reads, and recover on the next good read', async () => {
+  let runPoll
+  let phase = 'waiting'
+  let acceptance = 'current'
+  let fail = false
+  const requests = []
+  const events = { addEventListener() {}, removeEventListener() {} }
+  const sessionId = 'session-refresh-fixture'
+  const topics = [{ id: 'main', name: 'Overview' }]
+  const { api, render, flushEffects } = harness({
+    collectEffects: true,
+    document: { ...events, querySelector: () => ({}), querySelectorAll: () => [], visibilityState: 'visible', body: {} },
+    window: { ...events, sessionStorage: { getItem: (key) => key === 'dsh.super-agent.instance' ? 'default' : null, setItem() {} } },
+    setInterval(run, delay) { if (delay === 4000) runPoll = run; return 1 },
+    fetch: async (url, options) => {
+      const route = String(url).split('?')[0].split('/').at(-1)
+      requests.push({ route, options })
+      if (fail && ['state', 'task'].includes(route)) return { ok: false, status: 503, json: async () => ({ ok: false }) }
+      const payload = route === 'task'
+        ? { task: { id: 'delivery', status: 'idle', acceptance: { outcome: 'pass', state: acceptance } } }
+        : { router: { sessionId }, activeInstanceId: 'default', topics, memory: { review: { topic: { phase } } } }
+      return { ok: true, json: async () => ({ ok: true, ...payload }) }
+    },
+  })
+  api.rememberPanelSession('default', sessionId)
+  const page = () => render(api.SuperAgentPage, { t })
+  const rail = () => nodes(page(), (row) => row.type === api.ActivityRail)[0]
+  const memory = () => nodes(page(), (row) => row.type === api.TopicsPanel)[0].props
+  const settle = () => new Promise((done) => setImmediate(done))
+  page()
+  flushEffects()
+  await settle()
+  assert.ok(runPoll)
+  await rail().props.onSelect({ id: 'delivery' })
+  nodes(page(), (row) => typeof row.props.onManage === 'function')[0].props.onManage()
+  await settle()
+  assert.equal(rail().props.detail.acceptance.state, 'current')
+  assert.equal(memory().memory.review.topic.phase, 'waiting')
+
+  phase = 'running'
+  acceptance = 'stale'
+  runPoll()
+  await settle()
+  assert.equal(rail().props.detail.acceptance.state, 'stale')
+  assert.equal(rail().props.detailLoading, false)
+  assert.equal(memory().memory.review.topic.phase, 'running')
+
+  fail = true
+  runPoll()
+  await settle()
+  assert.ok(rail().props.detailError)
+  assert.equal(memory().refreshFailed, true)
+
+  fail = false
+  phase = 'idle'
+  runPoll()
+  await settle()
+  assert.equal(rail().props.detailError, '')
+  assert.equal(memory().refreshFailed, false)
+  assert.equal(memory().memory.review.topic.phase, 'idle')
+
+  rail().props.onBackDetail()
+  const priorTaskReads = requests.filter(({ route }) => route === 'task').length
+  runPoll()
+  await settle()
+  assert.equal(requests.filter(({ route }) => route === 'task').length, priorTaskReads)
+  assert.ok(requests.filter(({ route }) => ['state', 'task'].includes(route)).every(({ options }) => options.cache === 'no-store'))
 })
 
 test('sharing choices explain their boundaries and the select supports keyboard navigation and escape', () => {

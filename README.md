@@ -27,7 +27,7 @@ dsh plugin --profile web add github:TianzeLuo/dsh-super-agent
 | 项 | 值 |
 | --- | --- |
 | DSH | `>=0.2.1`（只写下界） |
-| 验证于 | 插件 0.18.0、DSH 0.2.2-rc.3（2026-11-18 UTC，见[兼容记录](docs/compat-matrix.md)） |
+| 验证于 | 插件 0.18.1、DSH 0.2.2-rc.3（2026-11-18 UTC，见[兼容记录](docs/compat-matrix.md)） |
 | Node | `>=22.5` |
 | 平台 | web profile；Windows / WSL2 已验证 |
 
@@ -126,7 +126,6 @@ Node 断言并给出修复建议。
 
 - 单机单进程；状态在 dataDir 的追加式 journal 里，不轮转。同一 dataDir 只有一个 Router 运行时，主题会话共用它。
 - `dsh web` 重启后，宿主成功恢复的 Worker 会话可续用。恢复失败的任务标为中断，保留原说明与报告，由 Router 决定如何继续。
-- 已打开的面板可能显示上次读取的状态。检查验收有效性时返回活动再打开任务，查看记忆整理结果时可切换分身后再切回。
 - 未装 [dsh-away-notify](https://github.com/TianzeLuo/dsh-away-notify) 时没有系统通知，只退回标题前缀标记。
 
 完整清单见 [已知限制](docs/limitations.md)。
