@@ -194,6 +194,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
     'superagent_models',
     'superagent_projects',
     'superagent_recall',
+    'superagent_review',
     'superagent_schedule',
     'superagent_status',
     'superagent_steer',
@@ -259,7 +260,7 @@ test('enabled project installs tools, prompt and HTTP routes on exactly one root
   const third = fakeAgent({ id: 'session-3', cwd: root })
   sys.agents.set(third.id, third)
   sys.emit('agent/created', { agent: third })
-  assert.equal(third.tools.size, 11)
+  assert.equal(third.tools.size, 12)
   sys.emit('agent/disposed', { agent: third })
 })
 
@@ -380,7 +381,7 @@ test('topics keep native histories but share one owner; concurrent ensures and i
   assert.equal(rig.created(), 3)
   assert.equal(new Set([main.dataDir, first.dataDir, second.dataDir]).size, 1)
   const topicAgent = rig.sys.agents.get(first.sessionId)
-  assert.equal(topicAgent.tools.size, 16)
+  assert.equal(topicAgent.tools.size, 17)
   assert.match(topicAgent.sections.map((row) => row.text).join('\n'), /### Durable facts and topic progress/)
   topicAgent.ctx.emit('agent/pre-step', { agent: topicAgent, messages: [{ id: 'fixture-human', role: 'user', content: 'Remember my local fixture.' }] }, () => undefined)
   await topicAgent.tools.get('superagent_memory').execute({ action: 'remember', text: 'LOCAL-ONLY fixture' }, {})
@@ -462,7 +463,7 @@ test('history sharing is explicit and read-only; restart and timer-first resume 
   await rig.close()
   const resumed = await topicRig(rig.home, rig.persisted)
   const coldTopic = await resumed.activate(source.sessionId)
-  assert.equal(coldTopic.tools.size, 16, 'cold topic lifecycle waits for the owning runtime before accepting a timer prompt')
+  assert.equal(coldTopic.tools.size, 17, 'cold topic lifecycle waits for the owning runtime before accepting a timer prompt')
   assert.ok(resumed.sys.agents.has(main.sessionId), 'overview restored as owner')
   assert.equal(resumed.created(), 0, 'existing native histories are restored, never replaced')
   const state = await resumed.request('state', undefined, { instance_id: 'default', topic_id: a.id })
@@ -486,7 +487,7 @@ test('collaboration sessions share the owner, retain pointers, guard native wait
   const deadline = Date.now() + 2000
   let managed
   while (Date.now() < deadline && !managed) {
-    managed = [...rig.sys.agents.values()].find((agent) => agent.id !== main.sessionId && agent.tools.size === 16)
+    managed = [...rig.sys.agents.values()].find((agent) => agent.id !== main.sessionId && agent.tools.has('superagent_group'))
     if (!managed) await new Promise((resolve) => setTimeout(resolve, 5))
   }
   assert.ok(managed, 'the native collaboration session is opened lazily')
@@ -615,7 +616,7 @@ test('UI ensure creates a Router through the generic Session API and focus updat
   assert.equal(pointer.ui, true)
   assert.equal(pointer.sessionId, body.sessionId)
   const router = sys.agents.get(body.sessionId)
-  assert.equal(router.tools.size, 11)
+  assert.equal(router.tools.size, 12)
 
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
@@ -730,7 +731,7 @@ test('UI ensure without cwd uses an independent Super-agent workspace', async ()
   assert.ok(existsSync(join(home, '.dsh', 'super-agent.json')))
   assert.deepEqual(created.map((workspace) => [workspace.title, workspace.path]), [['Super-agent Workspace', home]])
   assert.deepEqual(attached, [body.sessionId])
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 16)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 17)
   const projectTool = await sys.agents.get(body.sessionId).tools.get('superagent_projects').execute({}, {})
   assert.deepEqual(projectTool.projects.map((project) => project.title), ['alpha'])
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
@@ -928,7 +929,7 @@ test('the dedicated Router takes precedence over an older project Router', async
   const old = fakeAgent({ id: 'session-old-project-router', cwd: root })
   sys.agents.set(old.id, old)
   sys.emit('agent/created', { agent: old })
-  assert.equal(old.tools.size, 11)
+  assert.equal(old.tools.size, 12)
 
   const ensure = sys.routes.get('/api/super-agent/ui/ensure')
   const response = await ensure.fetch(new Request('http://127.0.0.1/api/super-agent/ui/ensure', {
@@ -939,7 +940,7 @@ test('the dedicated Router takes precedence over an older project Router', async
   assert.equal(response.status, 200)
   assert.equal(body.projectRoot, home)
   assert.notEqual(body.sessionId, old.id)
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 16)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 17)
   const state = await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
   )
@@ -1009,7 +1010,7 @@ test('UI reset starts a fresh dataDir generation and archives active workers', a
   assert.match(body.dataDir, /super-agent-resets[\\/]gen-/)
   assert.ok(archived.every((sessionId) => sessionId !== oldSession))
   assert.ok(archived.includes(activeWorker))
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 16)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 17)
   const state = await (await sys.routes.get('/api/super-agent/ui/state').fetch(
     new Request('http://127.0.0.1/api/super-agent/ui/state'),
   )).json()
@@ -1050,7 +1051,7 @@ test('UI ensure initializes a bare project with the minimal enable config', asyn
   const config = JSON.parse(readFileSync(join(root, '.dsh', 'super-agent.json'), 'utf8'))
   assert.equal(config.enabled, true)
   assert.equal(config.version, 1)
-  assert.equal(sys.agents.get(body.sessionId).tools.size, 11)
+  assert.equal(sys.agents.get(body.sessionId).tools.size, 12)
   sys.emit('agent/disposed', { agent: sys.agents.get(body.sessionId) })
 })
 

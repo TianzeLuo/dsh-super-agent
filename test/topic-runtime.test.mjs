@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Store } from '../lib/store.js'
 import { MAIN_TOPIC_ID, TopicRegistry } from '../lib/topics.js'
@@ -104,6 +104,127 @@ test('another topic can read a shared task report without receiving current loca
   assert.doesNotMatch(JSON.stringify(shared), /private\.decision\.key|decisionReview|decisionVersions/)
   assert.throws(() => ctx.runtime.withConversation(ctx.bScope, () => ctx.runtime.close({ taskId: task.taskId, verification: { basis: own.basis, evidence: 'Wrong scope.' } })), /outside this conversation scope/)
   ctx.runtime.stop()
+})
+
+test('a separate reviewer records a verdict for the selected report and bytes, and can review a later version', async (t) => {
+  const ctx = setup()
+  t.after(() => ctx.runtime.stop())
+  const dispatch = (args) => ctx.aTools.get('superagent_dispatch').execute({ title: 'Delivery check', brief: 'Check the startup instructions.', ...args })
+  const read = (id) => ctx.runtime.withConversation(ctx.aScope, () => ctx.runtime.recall(id).object)
+  const finish = async (taskId, text, turn) => {
+    await tick()
+    const task = ctx.store.getTask(taskId)
+    ctx.children.get(task.workerSessionId).finishTurn({ text, turn })
+    return task.lastReport.id
+  }
+  const cwd = join(ctx.project.root, 'delivery')
+  mkdirSync(cwd)
+  writeFileSync(join(cwd, 'README.md'), 'Start on port 4317')
+  const delivery = await dispatch({ cwd })
+  const deliveryReport = await finish(delivery.taskId, 'Startup instructions delivered.')
+  const binding = { task_id: delivery.taskId, files: ['README.md'] }
+  await assert.rejects(dispatch({ reuse_task_id: delivery.taskId, review_of: binding }), /separate reviewer/)
+  await assert.rejects(dispatch({ reuse_task_id: delivery.taskId, cwd: ctx.project.root }), /Omit cwd to inherit/)
+  await assert.rejects(dispatch({ review_of: { ...binding, files: ['../escape.txt'] } }), /inside the task directory/)
+  const outside = join(ctx.project.root, 'outside')
+  mkdirSync(outside)
+  writeFileSync(join(outside, 'private.txt'), 'Not part of the delivery')
+  symlinkSync(outside, join(cwd, 'linked'), 'junction')
+  await assert.rejects(dispatch({ review_of: { ...binding, files: ['linked/private.txt'] } }), /inside the task directory/)
+
+  const review = await dispatch({ review_of: binding })
+  assert.equal(review.cwd, cwd)
+  assert.equal(review.reviewOf.reportId, deliveryReport)
+  const verify = (task, reportId, outcome) => ctx.aTools.get('superagent_review').execute({
+    review_task_id: task.taskId, report_id: reportId, outcome, evidence: 'Read the startup instructions and checked the port.',
+  })
+  await assert.rejects(verify(review, deliveryReport, 'pass'), /current completed report/)
+  const reportId = await finish(review.taskId, 'Needs changes: the configured port is 4318.')
+  assert.notEqual(ctx.store.getTask(review.taskId).workerSessionId, ctx.store.getTask(delivery.taskId).workerSessionId)
+  const prompt = JSON.stringify(ctx.subagents.spawns.at(-1).spec)
+  assert.ok(prompt.includes(deliveryReport))
+  assert.ok(prompt.includes(review.reviewOf.files[0].sha256))
+  assert.match(prompt, /acceptance criteria in your current review brief/)
+  assert.ok(ctx.store.pendingTriggers(50).some((row) => row.text.includes('superagent_review') && row.text.includes(reportId)))
+  await assert.rejects(verify(delivery, deliveryReport, 'pass'), /declare review_of/)
+  await assert.rejects(verify(review, deliveryReport, 'pass'), /current completed report/)
+  await verify(review, reportId, 'needs_changes')
+  assert.equal(ctx.store.getTask(delivery.taskId).status, 'idle')
+  assert.deepEqual([read(delivery.taskId).acceptance.state, read(delivery.taskId).acceptance.outcome], ['current', 'needs_changes'])
+
+  writeFileSync(join(cwd, 'README.md'), 'Start on port 4318')
+  assert.equal(read(delivery.taskId).acceptance.state, 'stale')
+  await assert.rejects(verify(review, reportId, 'pass'), /report, decisions or files have changed/)
+  const next = await dispatch({ review_of: binding, reuse_task_id: review.taskId })
+  assert.notEqual(next.reviewOf.files[0].sha256, review.reviewOf.files[0].sha256)
+  const nextReport = await finish(next.taskId, 'Pass: the instructions and configured port both say 4318.', 2)
+  assert.equal(ctx.store.getTask(next.taskId).workerSessionId, ctx.store.getTask(review.taskId).workerSessionId)
+  await verify(next, nextReport, 'pass')
+  const detail = ctx.runtime.withConversation(ctx.aScope, () => ctx.runtime.taskDetail(delivery.taskId))
+  assert.equal(detail.acceptance.state, 'current')
+  assert.equal(detail.acceptance.fileCount, 1)
+  assert.equal(detail.acceptance.outcome, 'pass')
+  const journal = new Store({ dir: ctx.project.dataDir })
+  journal.open()
+  assert.equal(journal.getTask(delivery.taskId).acceptance.reviewerReportId, nextReport)
+  assert.deepEqual(journal.getTask(next.taskId).reviewOf, next.reviewOf)
+  await ctx.aTools.get('superagent_steer').execute({ task_id: delivery.taskId, message: 'Revise the report.' })
+  await finish(delivery.taskId, 'A new delivery report.', 2)
+  assert.equal(read(delivery.taskId).acceptance.state, 'stale')
+  await assert.rejects(verify(next, nextReport, 'pass'), /report, decisions or files have changed/)
+})
+
+test('decision updates stale a report-only review and shared history cannot use its review binding', async (t) => {
+  const ctx = setup()
+  t.after(() => ctx.runtime.stop())
+  ctx.topics.update(ctx.a.id, { sharing: 'history' })
+  const input = { action: 'save', scope: 'topic', key: 'project.runtime' }
+  ctx.topics.memoryAction(ctx.a.id, { ...input, text: 'Use the Windows runtime for verification.' }, { kind: 'operator' })
+  const args = { title: 'Startup check', brief: 'Check the configured runtime.' }
+  const dispatch = (options = {}) => ctx.aTools.get('superagent_dispatch').execute({ ...args, ...options })
+  const finish = async (result) => {
+    await tick()
+    const task = ctx.store.getTask(result.taskId)
+    ctx.children.get(task.workerSessionId).finishTurn({ text: 'Checked the startup instructions.' })
+    return task.lastReport.id
+  }
+  const delivery = await dispatch()
+  await finish(delivery)
+  const review_of = { task_id: delivery.taskId }
+  await assert.rejects(ctx.bTools.get('superagent_dispatch').execute({ ...args, review_of }), /must be in this conversation/)
+  const review = await dispatch({ review_of })
+  const verdict = { review_task_id: review.taskId, report_id: await finish(review), outcome: 'inconclusive', evidence: 'Only documentation was available.' }
+  await assert.rejects(ctx.bTools.get('superagent_review').execute(verdict), /outside this conversation scope/)
+  await ctx.aTools.get('superagent_review').execute(verdict)
+  const shared = ctx.runtime.withConversation(ctx.bScope, () => ctx.runtime.recall(delivery.taskId))
+  assert.equal(shared.ok, true)
+  assert.equal(shared.object.acceptance, undefined)
+  const sharedDetail = ctx.runtime.withConversation({ ...ctx.bScope, activityTopicId: ctx.b.id }, () => ctx.runtime.taskDetail(delivery.taskId))
+  assert.equal(sharedDetail.status, 'idle')
+  assert.equal(sharedDetail.acceptance, undefined)
+  ctx.topics.memoryAction(ctx.a.id, { ...input, text: 'Use the native Windows runtime and check port 4318.', expected_revision: 1 }, { kind: 'operator' })
+  assert.equal(ctx.runtime.withConversation(ctx.aScope, () => ctx.runtime.recall(delivery.taskId)).object.acceptance.state, 'stale')
+  await assert.rejects(ctx.aTools.get('superagent_review').execute(verdict), /report, decisions or files have changed/)
+})
+
+test('a queued review fails before starting a Worker when the selected delivery files change', async (t) => {
+  const ctx = setup({ maxWorkers: 1 })
+  t.after(() => ctx.runtime.stop())
+  const dispatch = (args) => ctx.aTools.get('superagent_dispatch').execute({ title: 'Queued check', brief: 'Check this fixture.', ...args })
+  const file = join(ctx.project.root, 'release.txt')
+  writeFileSync(file, 'v1')
+  const delivery = await dispatch()
+  await tick()
+  ctx.children.get(ctx.store.getTask(delivery.taskId).workerSessionId).finishTurn()
+  const blocker = await dispatch()
+  await tick()
+  const review = await dispatch({ review_of: { task_id: delivery.taskId, files: ['release.txt'] } })
+  assert.equal(review.status, 'queued')
+  writeFileSync(file, 'v2')
+  ctx.children.get(ctx.store.getTask(blocker.taskId).workerSessionId).finishTurn()
+  assert.equal(ctx.store.getTask(review.taskId).status, 'failed')
+  assert.equal(ctx.store.getTask(review.taskId).workerSessionId, undefined)
+  assert.equal(ctx.subagents.spawns.length, 2)
 })
 
 test('msg:last attachments are resolved from the calling topic, never the owner or a concurrent topic', async () => {

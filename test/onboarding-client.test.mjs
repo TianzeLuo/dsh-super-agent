@@ -302,6 +302,31 @@ test('task detail exposes changed and reviewed decision versions without marking
   assert.equal(nodes(tree, (row) => row.children.includes(evidence)).length, 1)
 })
 
+test('task details show a Worker report independently from its current or stale acceptance', () => {
+  const { api, render } = harness()
+  const task = { id: 'delivery', title: 'Delivery', status: 'idle', reports: [{ text: 'Delivered.', reason: 'completed' }],
+    acceptance: { outcome: 'needs_changes', state: 'current', reportId: 'rpt_delivery', reviewTaskId: 'reviewer', evidence: 'The port differed.', at: 1 } }
+  const selections = []
+  let tree = render(api.ActivityDetail, { task, t, onSelect: (row) => selections.push(row.id) })
+  assert.ok(nodes(tree, (row) => row.children.includes('statusIdle')).length > 0)
+  assert.equal(nodes(tree, (row) => row.children.includes('taskAcceptanceNeedsChanges')).length, 1)
+  nodes(tree, (row) => row.type === 'button' && row.children.includes('taskAcceptanceReviewer'))[0].props.onClick()
+  assert.deepEqual(selections, ['reviewer'])
+  tree = render(api.ActivityDetail, { task: { ...task, acceptance: { ...task.acceptance, outcome: 'pass', state: 'stale' } }, t })
+  assert.equal(nodes(tree, (row) => row.children.includes('taskAcceptanceStale')).length, 1)
+  assert.equal(nodes(tree, (row) => row.children.includes('taskAcceptancePass')).length, 0)
+})
+
+test('memory settings show the idle wait alongside the last organization result', () => {
+  const { api, render } = harness()
+  const props = { t, topicId: 'main', topics: [{ id: 'main', name: 'Overview fixture', state: {} }],
+    memory: { review: { auto: true, topic: { phase: 'waiting', eligibleAt: 900000, outcome: 'unchanged', at: 1000 } } } }
+  const tree = render(api.TopicsPanel, props)
+  nodes(tree, (row) => row.props.role === 'tab' && row.children.includes('memoryTabFacts'))[0].props.onClick()
+  const line = nodes(render(api.TopicsPanel, props), (row) => row.props.role === 'status')[0]
+  assert.match(line.children.join(''), /memoryReviewWaiting.*memoryReviewEligibleAt.*memoryReviewUnchanged/)
+})
+
 test('rule editing preserves audience/scenes on rejected save and normalizes labels without broadening the rule', async () => {
   const { api, render } = harness()
   const calls = []
