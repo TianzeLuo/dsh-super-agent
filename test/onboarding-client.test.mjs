@@ -286,6 +286,22 @@ test('task details render both briefs and reports with Markdown and retain subtl
   assert.deepEqual(selections, ['previous', 'previous'])
 })
 
+test('task detail exposes changed and reviewed decision versions without marking the report verified', () => {
+  const { api, render } = harness()
+  const before = { id: 'mem_runtime', key: 'project.runtime', scope: 'instance', revision: 1 }
+  const after = { ...before, revision: 2 }
+  const task = { id: 'current', title: 'Review', status: 'closed', reports: [{ text: 'Runbook delivered.', decisionVersions: [before] }],
+    decisionReview: { state: 'needs_review', changes: [{ before, after }] } }
+  let tree = render(api.ActivityDetail, { task, t })
+  assert.equal(nodes(tree, (row) => row.children.includes('taskDecisionReview')).length, 1)
+  assert.equal(nodes(tree, (row) => row.children.includes('project.runtime · instance r1 → instance r2')).length, 1)
+  assert.equal(nodes(tree, (row) => row.children.includes('taskDecisionVersions')).length, 1)
+  const evidence = 'Independent Windows startup check passed.'
+  tree = render(api.ActivityDetail, { task: { ...task, decisionReview: { ...task.decisionReview, state: 'reviewed', verification: { evidence } } }, t })
+  assert.equal(nodes(tree, (row) => row.children.includes('taskDecisionReviewed')).length, 1)
+  assert.equal(nodes(tree, (row) => row.children.includes(evidence)).length, 1)
+})
+
 test('rule editing preserves audience/scenes on rejected save and normalizes labels without broadening the rule', async () => {
   const { api, render } = harness()
   const calls = []

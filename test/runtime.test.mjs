@@ -239,6 +239,81 @@ test('steer defaults to interrupt: one next-step delivery within the current run
   ctx.runtime.stop()
 })
 
+test('a released native Worker reopens the same Session for both reuse and steer', async () => {
+  const ctx = setupRuntime()
+  const prompts = []
+  ctx.subagents.prompt = async (request) => {
+    prompts.push(request)
+    const reopened = fakeChild(request.childSessionId)
+    ctx.children.set(reopened.id, reopened)
+    return { messageId: request.requestId }
+  }
+  const first = ctx.runtime.dispatch({ title: 'Initial guide', brief: 'Use the original plan.' })
+  await tick()
+  const sessionId = ctx.store.getTask(first.taskId).workerSessionId
+  const original = ctx.children.get(sessionId)
+  original.finishTurn({ text: 'Initial delivery', turn: 1 })
+  ctx.children.delete(sessionId)
+  assert.equal(ctx.runtime.taskDetail(first.taskId).workerLive, false)
+  assert.equal(ctx.runtime.taskDetail(first.taskId).workerCanContinue, true)
+
+  const next = ctx.runtime.dispatch({ title: 'Updated guide', brief: 'Apply the changed decision.', reuseTaskId: first.taskId })
+  await tick()
+  assert.equal(ctx.subagents.spawns.length, 1)
+  assert.equal(ctx.store.getTask(next.taskId).workerSessionId, sessionId)
+  assert.equal(prompts.length, 1)
+  assert.equal(prompts[0].childSessionId, sessionId)
+  assert.equal(prompts[0].delivery, 'queue')
+  assert.match(messageText(prompts[0]), /Apply the changed decision/)
+  const reopened = ctx.children.get(sessionId)
+  reopened.finishTurn({ text: 'Revision delivered', turn: 2 })
+  assert.equal(ctx.store.getTask(first.taskId).lastReport.turn, 1)
+  assert.equal(ctx.store.getTask(next.taskId).lastReport.turn, 2)
+
+  ctx.children.delete(sessionId)
+  reopened.dispose()
+  assert.equal(ctx.store.getTask(next.taskId).status, 'idle')
+  const steer = await ctx.runtime.steer(next.taskId, 'Check the second file.')
+  assert.equal(steer.status, 'accepted')
+  assert.equal(prompts.length, 2)
+  assert.equal(prompts[1].childSessionId, sessionId)
+  assert.equal(prompts[1].delivery, 'steer')
+  assert.match(messageText(prompts[1]), /Check the second file/)
+  assert.equal(ctx.store.getTask(next.taskId).steerCount, 1)
+  ctx.runtime.stop()
+})
+
+test('native continuation refusal stays retryable and closing aborts pending inbox admission', async () => {
+  const ctx = setupRuntime()
+  ctx.subagents.prompt = async () => { throw new Error('native inbox is unavailable') }
+  const first = ctx.runtime.dispatch({ title: 'Report', brief: 'Initial task.' })
+  await tick()
+  const task = ctx.store.getTask(first.taskId)
+  ctx.children.get(task.workerSessionId).finishTurn({ text: 'Initial report', turn: 1 })
+  ctx.children.delete(task.workerSessionId)
+  await assert.rejects(ctx.runtime.steer(task.id, 'First follow-up'), /inbox is unavailable/)
+  assert.equal(task.status, 'idle')
+  assert.equal(task.lastReport.text, 'Initial report')
+  assert.equal(task.steerCount, undefined)
+
+  const admission = Promise.withResolvers()
+  let delivery
+  ctx.subagents.prompt = (request, signal) => {
+    delivery = request.delivery
+    signal.addEventListener('abort', () => admission.reject(new Error('inbox admission cancelled')), { once: true })
+    return admission.promise
+  }
+  const pending = ctx.runtime.steer(task.id, 'Second follow-up', { interrupt: false })
+  assert.equal(delivery, 'queue')
+  assert.throws(() => ctx.runtime.steer(task.id, 'Conflicting follow-up'), /no live worker/)
+  assert.throws(() => ctx.runtime.dispatch({ title: 'Conflicting reuse', brief: 'Must wait.', reuseTaskId: task.id }), /while it is starting/)
+  ctx.runtime.close({ taskId: task.id })
+  await assert.rejects(pending, /inbox admission cancelled/)
+  assert.equal(task.status, 'closed')
+  assert.equal(task.steerCount, undefined)
+  ctx.runtime.stop()
+})
+
 test('steer interrupt:false keeps the legacy queue: the message waits for a new turn', async () => {
   const ctx = setupRuntime()
   const dispatched = ctx.runtime.dispatch({ title: 'Fix login', brief: 'Do the work' })

@@ -58,7 +58,12 @@ test('group organization receives only group evidence and cannot publish into to
   const saved = ctx.operator(() => ctx.board.memory({ group_id: group.id, action: 'save', key: 'review.gate', text: 'Do not publish before approval. Do not publish before approval.' }))
   ctx.runtime.models.complete = async (_selection, { input }) => {
     assert.doesNotMatch(input, /PRIVATE-ORGANIZATION-CANARY|PRIVATE-TRANSCRIPT-CANARY/)
-    assert.equal(JSON.parse(input).scope, `group:${group.id}`)
+    const supplied = JSON.parse(input)
+    assert.equal(supplied.scope, `group:${group.id}`)
+    if (supplied.phase === 'evidence_check') {
+      assert.deepEqual(supplied.cited_memories.map(({ id }) => id), [`memory:${saved.entry.id}`])
+      return JSON.stringify({ checks: [{ index: 1, supported: true, reason: 'The existing rule retains the approval condition.' }] })
+    }
     return JSON.stringify({ operations: [{ action: 'save', id: saved.entry.id, text: 'Do not publish before approval.', evidence: [`memory:${saved.entry.id}`], reason: 'Remove repetition, preserving the restriction.' }], reason: 'Consolidated the group record.' })
   }
   await ctx.runtime.memoryReview.organize(`group:${group.id}`, { manual: true })

@@ -11,16 +11,27 @@ const operation = (entry, text, evidence = ['u2']) => ({ action: 'save', id: ent
 
 function fixture(options = {}) {
   let now = 100, enabled = true
-  const data = { entries: options.entries ?? [], review: {}, busy: false, messages: options.messages ?? [message('u1', 'For future releases, Linux verification is required.')], calls: [] }
+  const idleMs = options.idleMs ?? 1000
+  const data = { entries: options.entries ?? [], review: {}, busy: false, messages: options.messages ?? [message('u1', 'For future releases, Linux verification is required.')], calls: [], checks: [] }
   const target = () => ({ ...data, fingerprint: memorySnapshot(data.entries), messages: () => data.messages,
     commit(snapshot, entries, review) { assert.equal(memorySnapshot(data.entries), snapshot); data.entries = entries; data.review = review },
     record(review) { data.review = review },
   })
-  const manager = new MemoryReview({ targets: () => ['topic:a'], target, enabled: () => enabled, now: () => now, idleMs: 1000,
-    generate: async (request) => { data.calls.push(JSON.parse(request.input)); return options.generate ? options.generate(request, data) : JSON.stringify({ operations: [], reason: 'No useful durable change.' }) },
+  const manager = new MemoryReview({ targets: () => ['topic:a'], target, enabled: () => enabled, now: () => now, idleMs,
+    generate: async (request) => {
+      const input = JSON.parse(request.input)
+      if (input.phase === 'evidence_check') {
+        data.checks.push(input)
+        return options.verify ? options.verify(input, data) : approved(input)
+      }
+      data.calls.push(input)
+      return options.generate ? options.generate(request, data) : JSON.stringify({ operations: [], reason: 'No useful durable change.' })
+    },
   })
-  return { data, manager, target, advance: () => { now += 1001 }, disable: () => { enabled = false } }
+  return { data, manager, target, advance: (duration = idleMs + 1) => { now += duration }, disable: () => { enabled = false } }
 }
+
+const approved = (input) => JSON.stringify({ checks: input.changes.map(({ index }) => ({ index, supported: true, reason: 'Checked the fixture evidence.' })) })
 
 test('evidence excludes tools, reasoning and generated snapshots; oversized messages are omitted whole', () => {
   const evidence = memoryEvidence([
@@ -50,9 +61,11 @@ test('organization updates the same fact, archives redundancy, keeps qualifiers 
   assert.equal(f.data.entries[0].text, 'Verify on Linux only; do not publish without approval.')
   assert.equal(f.data.entries[1].status, 'archived')
   assert.equal(f.data.review.cursor, 'u2')
+  assert.equal(f.data.checks[0].changes.length, 2)
   await f.manager.organize('topic:a', { manual: true })
   assert.equal(f.data.entries[0].revision, 2, 'a no-op cannot rewrite the version')
   assert.equal(f.data.review.outcome, 'unchanged')
+  assert.equal(f.data.checks.length, 1, 'a no-op requires no evidence model call')
 })
 
 test('invalid plans cannot partially change memory, expand scope or resurrect archived facts', () => {
@@ -95,12 +108,13 @@ test('one repair receives the validator error and original evidence, then commit
   const f = fixture({ messages: [message('u1', 'For future releases, verify on Linux.'), message('a1', 'I will verify the current run.', 'assistant')],
     generate: (request, data) => {
       if (data.calls.length === 1) {
-        input = request.input
+        input = JSON.parse(request.input)
         return JSON.stringify({ operations: [rejected] })
       }
-      assert.equal(request.input, input)
-      assert.match(request.system, /New memory requires new human evidence/)
-      assert.doesNotMatch(request.system, /Unverified draft/)
+      const { validation_feedback, ...retry } = JSON.parse(request.input)
+      assert.deepEqual(retry, input)
+      assert.match(validation_feedback, /New memory requires new human evidence/)
+      assert.doesNotMatch(request.input, /Unverified draft/)
       assert.deepEqual(data.entries, [])
       assert.deepEqual(data.review, {})
       return { text: JSON.stringify({ operations: [saved], reason: 'Kept the release requirement.' }), provider: 'qoder', model: 'dfmodel' }
@@ -108,10 +122,57 @@ test('one repair receives the validator error and original evidence, then commit
   })
   const result = await f.manager.organize('topic:a')
   assert.equal(f.data.calls.length, 2)
+  assert.equal(f.data.checks.length, 1)
   assert.equal(result.review.cursor, 'a1')
   assert.equal(result.review.outcome, 'updated')
   assert.equal(result.review.model, 'qoder/dfmodel')
   assert.deepEqual(f.data.entries.map((entry) => [entry.key, entry.text, entry.source.evidence]), [[saved.key, saved.text, ['u1']]])
+})
+
+test('a valid source ID cannot bypass review of an unrelated clause in the proposed text', async () => {
+  const grounded = 'Public release requires Windows and Linux compatibility checks and maintainer approval.'
+  const invented = ' Keep the acceptance records permanently and use blue buttons.'
+  const candidate = { action: 'save', key: 'release', evidence: ['u1'], reason: 'Confirmed release requirements.' }
+  const f = fixture({ messages: [message('u1', `${grounded} Blue is for this preview only.`), message('a1', 'Unrelated assistant draft.', 'assistant')],
+    generate: ({ input }, data) => {
+      assert.deepEqual(data.entries, [], 'the initial proposal remains uncommitted during repair')
+      const { validation_feedback } = JSON.parse(input)
+      if (data.calls.length === 2) assert.match(validation_feedback, /Permanent retention and blue buttons/)
+      return JSON.stringify({ operations: [{ ...candidate, text: data.calls.length === 1 ? grounded + invented : grounded }] })
+    },
+    verify: (input, data) => {
+      assert.deepEqual(input.messages.map(({ id }) => id), ['u1'])
+      assert.deepEqual(input.changes[0].evidence, ['u1'])
+      return data.checks.length === 1 ? JSON.stringify({ checks: [{ index: 1, supported: false, reason: 'Permanent retention and blue buttons lack lasting user evidence.' }] }) : approved(input)
+    },
+  })
+  await f.manager.organize('topic:a')
+  assert.equal(f.data.checks.length, 2)
+  assert.equal(f.data.entries[0].text, grounded)
+})
+
+test('incomplete evidence verdicts cannot commit half a plan, even after retry', async () => {
+  const prior = fact('release', 'Check Windows and wait for review.')
+  const f = fixture({ entries: [prior], messages: [message('u2', 'Also check Linux and keep the staging environment isolated.')],
+    generate: () => JSON.stringify({ operations: [operation(prior, 'Check Windows and Linux and wait for review.'),
+      { action: 'save', key: 'staging', text: 'Keep staging isolated.', evidence: ['u2'], reason: 'Confirmed requirement.' }] }),
+    verify: () => JSON.stringify({ checks: [{ index: 1, supported: true, reason: 'Applicable.' }] }),
+  })
+  await assert.rejects(f.manager.organize('topic:a'), /did not cover every change/)
+  assert.equal(f.data.checks.length, 2)
+  assert.deepEqual(f.data.entries, [prior])
+  assert.equal(f.data.review.attempted, 'u2')
+  assert.equal(f.data.review.cursor, undefined)
+})
+
+test('a newer human message during evidence checking invalidates the approved plan', async () => {
+  const f = fixture({
+    generate: () => JSON.stringify({ operations: [{ action: 'save', key: 'release', text: 'Verify on Linux.', evidence: ['u1'], reason: 'Required test.' }] }),
+    verify(input, data) { data.messages.push(message('u2', 'Use Windows instead.')); return approved(input) },
+  })
+  await assert.rejects(f.manager.organize('topic:a'), /inputs changed/)
+  assert.equal(f.data.calls.length, 1)
+  assert.deepEqual(f.data.entries, [])
 })
 
 test('an invalid repair preserves all entries and the last successful cursor and stops after two calls', async () => {
@@ -196,6 +257,29 @@ test('idle debounce waits for work to finish, persists no-op cursors and avoids 
     f.advance(); await f.manager.tick()
     assert.equal(f.data.calls.length, 2)
   } finally { f.manager.stop() }
+})
+
+test('fifteen idle minutes only qualify new material, and scheduled no-ops do not recur', async () => {
+  const f = fixture({ idleMs: 900_000, messages: [] })
+  f.manager.start()
+  await f.manager.tick()
+  f.advance(1_800_000)
+  await f.manager.tick()
+  assert.equal(f.data.calls.length, 0)
+  f.data.messages.push(message('u1', 'A temporary discussion.'))
+  await f.manager.tick()
+  f.advance(899_999)
+  await f.manager.tick()
+  assert.equal(f.data.calls.length, 0)
+  f.advance(1)
+  await f.manager.tick()
+  await tick()
+  assert.equal(f.data.review.outcome, 'unchanged')
+  assert.equal(f.data.calls.length, 1)
+  f.advance(900_000)
+  await f.manager.tick()
+  assert.equal(f.data.calls.length, 1)
+  f.manager.stop()
 })
 
 test('only one background call runs and stopping aborts it without committing partial data', async () => {

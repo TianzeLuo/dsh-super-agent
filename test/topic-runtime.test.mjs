@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { Store } from '../lib/store.js'
 import { MAIN_TOPIC_ID, TopicRegistry } from '../lib/topics.js'
 import { createTools } from '../lib/tools.js'
 import { fakeProject, fakeRouter, setupRuntime, tick } from './fake-host.mjs'
@@ -32,6 +33,78 @@ function setup(options = {}) {
   const tools = (scope) => new Map(createTools(ctx.runtime, scope).map((definition) => [definition.name, definition]))
   return { ...ctx, project, topics, a, b, first, second, aScope, bScope, aTools: tools(aScope), bTools: tools(bScope) }
 }
+
+test('reused Workers receive current decisions and review evidence is bound to the latest report and fact versions', async () => {
+  const ctx = setup()
+  const key = 'project.runtime'
+  const save = (text, expected_revision) => ctx.topics.memoryAction(MAIN_TOPIC_ID, { action: 'save', scope: 'instance', key, text, expected_revision }, { kind: 'operator' }).entry
+  const inspect = (id) => ctx.runtime.withConversation(ctx.aScope, () => ctx.runtime.recall(id).object)
+  const initial = save('WSL_DEFAULT is the daily runtime. Public release requires approval.', 0)
+  const first = await ctx.aTools.get('superagent_dispatch').execute({ title: 'Initial build', brief: 'Prepare the runbook and a verified runtime.' })
+  await tick()
+  const workerId = ctx.store.getTask(first.taskId).workerSessionId
+  const child = ctx.children.get(workerId)
+  child.finishTurn({ turn: 1, text: 'The first runbook describes a WSL default.' })
+  assert.deepEqual(ctx.store.getTask(first.taskId).lastReport.decisionVersions, [{ id: initial.id, key, scope: 'instance', revision: 1 }])
+  assert.equal(inspect(first.taskId).decisionReview, undefined)
+
+  save('WINDOWS_NATIVE is the daily runtime. WSL is for compatibility checks. Public release requires approval.', 1)
+  const firstReview = inspect(first.taskId).decisionReview
+  assert.equal(firstReview.state, 'needs_review')
+  assert.deepEqual(firstReview.changes.map(({ before, after }) => [before.revision, after.revision]), [[1, 2]])
+  const continued = await ctx.aTools.get('superagent_dispatch').execute({ title: 'Revise the same runbook', brief: 'Recheck the documentation and its startup commands.', reuse_task_id: first.taskId })
+  await tick()
+  assert.equal(ctx.subagents.spawns.length, 1)
+  assert.equal(ctx.store.getTask(continued.taskId).workerSessionId, workerId)
+  const input = JSON.stringify(child.followups.at(-1))
+  assert.match(input, /project\.runtime.*instance r1 → instance r2/)
+  assert.match(input, /WINDOWS_NATIVE is the daily runtime/)
+  assert.doesNotMatch(input, /WSL_DEFAULT/)
+  child.finishTurn({ turn: 2, text: 'Updated the runbook and compatibility guide.' })
+  const currentReview = inspect(continued.taskId).decisionReview
+  assert.equal(currentReview.state, 'needs_review')
+  assert.notEqual(currentReview.basis, firstReview.basis)
+  assert.equal(ctx.store.getTask(continued.taskId).lastReport.decisionVersions[0].revision, 2)
+  assert.ok(ctx.store.pendingTriggers(50).some((row) => row.text.startsWith(`Decision review needed for task ${continued.taskId}.`)))
+
+  save('WINDOWS_NATIVE is the daily runtime and binds only to loopback. WSL is for compatibility checks. Public release requires approval.', 2)
+  const evidence = 'Independent review checked README and compatibility commands at commit abc123, including the loopback health endpoint.'
+  const close = (basis) => ctx.aTools.get('superagent_close').execute({ task_id: continued.taskId, verification: { basis, evidence } })
+  await assert.rejects(close(currentReview.basis), /review basis.*changed/)
+  assert.equal(ctx.store.getTask(continued.taskId).status, 'idle')
+  ctx.runtime.withConversation(ctx.aScope, () => ctx.runtime.steer(continued.taskId, 'Update the remaining affected files.'))
+  assert.match(JSON.stringify(child.steers.at(-1)), /project\.runtime.*instance r2 → instance r3/)
+  child.finishTurn({ turn: 3, text: 'Verified the loopback service and updated both documents.' })
+  await close(inspect(continued.taskId).decisionReview.basis)
+  assert.equal(inspect(continued.taskId).decisionReview.state, 'reviewed')
+  assert.equal(inspect(continued.taskId).decisionReview.verification.evidence, evidence)
+  const journal = new Store({ dir: ctx.project.dataDir })
+  journal.open()
+  assert.equal(journal.getTask(continued.taskId).lastReport.decisionVersions[0].revision, 3)
+  assert.equal(journal.getTask(continued.taskId).decisionVerification.evidence, evidence)
+
+  save('WINDOWS_NATIVE now uses loopback port 4318. Public release requires approval.', 3)
+  assert.equal(inspect(continued.taskId).decisionReview.state, 'needs_review')
+  ctx.runtime.stop()
+})
+
+test('another topic can read a shared task report without receiving current local decision versions', async () => {
+  const ctx = setup()
+  ctx.topics.update(ctx.a.id, { sharing: 'history' })
+  const input = { action: 'save', scope: 'topic', key: 'private.decision.key' }
+  ctx.topics.memoryAction(ctx.a.id, { ...input, text: 'Local decision v1.' }, { kind: 'operator' })
+  const task = await ctx.aTools.get('superagent_dispatch').execute({ title: 'Local work', brief: 'Record the checked files.' })
+  await tick()
+  ctx.children.get(ctx.store.getTask(task.taskId).workerSessionId).finishTurn({ text: 'Local work was implemented.' })
+  ctx.topics.memoryAction(ctx.a.id, { ...input, text: 'Local decision v2.', expected_revision: 1 }, { kind: 'operator' })
+  const own = ctx.runtime.withConversation(ctx.aScope, () => ctx.runtime.recall(task.taskId).object.decisionReview)
+  assert.equal(own.changes[0].before.key, input.key)
+  const shared = ctx.runtime.withConversation(ctx.bScope, () => ctx.runtime.recall(task.taskId))
+  assert.equal(shared.ok, true)
+  assert.doesNotMatch(JSON.stringify(shared), /private\.decision\.key|decisionReview|decisionVersions/)
+  assert.throws(() => ctx.runtime.withConversation(ctx.bScope, () => ctx.runtime.close({ taskId: task.taskId, verification: { basis: own.basis, evidence: 'Wrong scope.' } })), /outside this conversation scope/)
+  ctx.runtime.stop()
+})
 
 test('msg:last attachments are resolved from the calling topic, never the owner or a concurrent topic', async () => {
   const ctx = setup()
